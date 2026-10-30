@@ -56,6 +56,7 @@ class LiveAgent(QObject):
         self._full_duplex = full_duplex  # True when the user wears headphones
         self._mic_enabled = True
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._main: asyncio.Task | None = None
         self._thread: threading.Thread | None = None
         self._audio_q: asyncio.Queue[bytes] | None = None
         self._session = None
@@ -73,8 +74,10 @@ class LiveAgent(QObject):
 
     def stop(self) -> None:
         self._stopping = True
-        if self._loop:
-            self._loop.call_soon_threadsafe(self._loop.stop)
+        if self._loop and self._main:
+            self._loop.call_soon_threadsafe(self._main.cancel)
+        if self._thread:
+            self._thread.join(timeout=3)
         self._mic.stop()
         self._speaker.stop()
 
@@ -98,7 +101,13 @@ class LiveAgent(QObject):
             return
         if self._state == State.LISTENING:
             self.level.emit(level)
-        self._loop.call_soon_threadsafe(self._audio_q.put_nowait, pcm)
+        self._loop.call_soon_threadsafe(self._enqueue_audio, pcm)
+
+    def _enqueue_audio(self, pcm: bytes) -> None:
+        assert self._audio_q is not None
+        if self._audio_q.full():  # not connected: drop the oldest audio
+            self._audio_q.get_nowait()
+        self._audio_q.put_nowait(pcm)
 
     def _on_speaker_level(self, level: float) -> None:
         if self._speaker.is_playing:
@@ -118,18 +127,21 @@ class LiveAgent(QObject):
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
         self._audio_q = asyncio.Queue(maxsize=200)
+        self._main = self._loop.create_task(self._run())
         try:
-            self._loop.run_until_complete(self._run())
-        except RuntimeError:
-            pass  # loop stopped by stop()
+            self._loop.run_until_complete(self._main)
+        except asyncio.CancelledError:
+            pass  # stopped by stop()
         finally:
+            self._loop.close()
             self._set_state(State.OFFLINE)
 
     def _config(self, handle: str | None) -> types.LiveConnectConfig:
         return types.LiveConnectConfig(
             response_modalities=[types.Modality.AUDIO],
             system_instruction=SYSTEM_PROMPT,
-            tools=tools.declarations() + [types.Tool(google_search=types.GoogleSearch())],
+            # Google Search grounding is not included in the free tier.
+            tools=tools.declarations(),
             input_audio_transcription=types.AudioTranscriptionConfig(),
             output_audio_transcription=types.AudioTranscriptionConfig(),
             context_window_compression=types.ContextWindowCompressionConfig(
@@ -163,13 +175,15 @@ class LiveAgent(QObject):
                     backoff = 1
                     handle = await self._serve(s, handle)
             except errors.APIError as e:
+                detail = e.message or str(e)
                 if e.code in (1008, 400, 401, 403):
-                    self.fatal_error.emit(e.message or "Google rejected the API key.")
+                    self.fatal_error.emit(detail or "Google rejected the API key.")
                     return
-                if e.code == 429:
+                if e.code == 429 or "quota" in detail.lower():
                     self.error.emit("Free-tier quota reached. Retrying shortly…")
+                    backoff = MAX_BACKOFF
                 else:
-                    self.error.emit(f"Connection lost: {e.message or e.code}")
+                    self.error.emit(f"Connection lost: {detail}")
             except Exception as e:
                 log.exception("Live session failed")
                 self.error.emit(f"Connection lost: {e}")

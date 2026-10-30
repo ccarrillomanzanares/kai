@@ -90,7 +90,9 @@ def validate_api_key(key: str) -> str | None:
     from google.genai import errors
 
     try:
-        genai.Client(api_key=key.strip()).models.get(model=MODEL)
+        # Keep a reference: the client closes its HTTP session when collected.
+        client = genai.Client(api_key=key.strip())
+        client.models.get(model=MODEL)
     except errors.ClientError as e:
         if e.code in (400, 401, 403):
             return "Google rejected this key. Check that you copied it completely."

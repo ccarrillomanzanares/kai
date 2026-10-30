@@ -26,7 +26,7 @@ Caveats:
 | Text in/out | ✅ | Typed chat as an alternative |
 | Images / video frames (JPEG, ≤1 fps) | ✅ | **Screen vision** and webcam |
 | Function calling (async by default, `NON_BLOCKING`) | ✅ | **Core of computer control** |
-| Google Search grounding | ✅ | Up-to-date answers |
+| Google Search grounding | ⚠️ | Not in the free tier ("exceeded your current quota"); disabled |
 | Input and output transcription | ✅ | Captions and history |
 | ~70 languages | ✅ | Speaks the user's language |
 | Proactive audio (always on) | ✅ | The model decides when to speak |
