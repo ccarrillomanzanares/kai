@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import itertools
 import logging
+import time
 import threading
 
 from google import genai
@@ -17,6 +18,7 @@ from google.genai import errors, types
 from PySide6.QtCore import QObject, Signal
 
 from kai import tools
+from kai import audio
 from kai.audio import IN_RATE, Microphone, Speaker
 from kai.config import MODEL
 
@@ -67,6 +69,7 @@ About the kai app itself, so you can help the user with it:
 
 MAX_BACKOFF = 30
 CONFIRM_TIMEOUT = 120  # seconds before an unanswered confirmation counts as declined
+HEARTBEAT_SECONDS = 60  # how often the log records the health of the session
 
 
 class State:
@@ -89,13 +92,15 @@ class LiveAgent(QObject):
     ui_action = Signal(str)  # a tool asked the app to do something in the UI
     confirm_requested = Signal(int, str, str)  # (request id, title, detail)
 
-    def __init__(self, api_key: str, full_duplex: bool = False, voice: str | None = None,
+    def __init__(self, api_key: str, full_duplex: bool | None = None, voice: str | None = None,
                  accent_instruction: str = ""):
         super().__init__()
         self._api_key = api_key
         self._voice = voice
         self._system_prompt = SYSTEM_PROMPT + (f"\n{accent_instruction}\n" if accent_instruction else "")
-        self._full_duplex = full_duplex  # True when the user wears headphones
+        # True when the user wears headphones; None = detect from the output device.
+        self._full_duplex = full_duplex
+        self._auto_duplex = full_duplex is None
         self._mic_enabled = True
         self._permission = tools.Permission.BALANCED
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -109,6 +114,10 @@ class LiveAgent(QObject):
         self._confirm_ids = itertools.count(1)
         self._speaker = Speaker(on_level=self._on_speaker_level)
         self._mic = Microphone(on_chunk=self._on_mic_chunk)
+        self._audio_ok = False
+        # Content-free counters for the heartbeat log line.
+        self._stats = {"sent": 0, "gated": 0, "muted": 0, "peak": 0.0, "msgs": 0, "heard": 0}
+        self._last_server_msg = time.monotonic()
 
     # ---- public API (call from the UI thread) ----
 
@@ -163,13 +172,19 @@ class LiveAgent(QObject):
     # ---- audio callbacks (audio threads) ----
 
     def _on_mic_chunk(self, pcm: bytes, level: float) -> None:
-        if not self._mic_enabled or self._audio_q is None or self._loop is None:
+        if self._audio_q is None or self._loop is None:
+            return
+        if not self._mic_enabled:
+            self._stats["muted"] += 1
             return
         # Without headphones the speaker leaks into the mic and kai would
         # interrupt itself, so we only listen while it is quiet.
         if not self._full_duplex and self._speaker.is_playing:
+            self._stats["gated"] += 1
             return
-        if self._state == State.LISTENING:
+        self._stats["sent"] += 1
+        self._stats["peak"] = max(self._stats["peak"], level)
+        if self._state in (State.LISTENING, State.THINKING):
             self.level.emit(level)
         self._loop.call_soon_threadsafe(self._enqueue_audio, pcm)
 
@@ -227,16 +242,65 @@ class LiveAgent(QObject):
 
     async def _run(self) -> None:
         client = genai.Client(api_key=self._api_key)
-        try:
-            self._speaker.start()
-            self._mic.start()
-        except Exception as e:  # no PortAudio or no devices: keep working as text chat
-            log.warning("Audio unavailable: %s", e)
-            self.error.emit("No audio device found, text only.")
+        self._start_audio()
+        watchdog = asyncio.create_task(self._watchdog())
         try:
             await self._reconnect_loop(client)
         finally:
+            watchdog.cancel()
             await client.aio.aclose()
+
+    def _start_audio(self) -> None:
+        try:
+            mic_name, out_name = audio.default_devices()
+            if self._full_duplex is None:
+                self._full_duplex = audio.is_headphones(out_name)
+            log.info("Audio: mic '%s', output '%s', headphones mode: %s",
+                     mic_name, out_name, self._full_duplex)
+            self._speaker.start()
+            self._mic.start()
+            self._audio_ok = True
+        except Exception as e:  # no PortAudio or no devices: keep working as text chat
+            log.warning("Audio unavailable: %s", e)
+            self.error.emit("No audio device found, text only.")
+
+    def _restart_audio(self) -> None:
+        """Reopen both streams on the current default devices."""
+        import sounddevice as sd
+
+        self._mic.stop()
+        self._speaker.stop()
+        try:
+            # PortAudio caches the device list; refresh it to pick up new defaults.
+            sd._terminate()
+            sd._initialize()
+        except Exception as e:
+            log.warning("PortAudio reinit failed: %s", e)
+        self._audio_ok = False
+        self._full_duplex = None if self._auto_duplex else self._full_duplex
+        self._start_audio()
+
+    async def _watchdog(self) -> None:
+        """Restart audio streams the OS stopped, and log a heartbeat now and then."""
+        last_beat = time.monotonic()
+        while True:
+            await asyncio.sleep(1)
+            stalled = [type(st).__name__ for st in (self._mic, self._speaker) if st.stalled()]
+            if self._audio_ok and stalled:
+                log.warning("Audio stalled (%s), restarting audio", ", ".join(stalled))
+                await asyncio.to_thread(self._restart_audio)
+            now = time.monotonic()
+            if now - last_beat >= HEARTBEAT_SECONDS:
+                st = self._stats
+                log.info(
+                    "Heartbeat: state=%s connected=%s mic_sent=%d mic_gated=%d mic_muted=%d "
+                    "mic_peak=%.2f speaker_buffer=%.1fs server_msgs=%d speech_heard=%d "
+                    "last_server_msg=%.0fs ago",
+                    self._state, self._session is not None, st["sent"], st["gated"],
+                    st["muted"], st["peak"], self._speaker.buffered_seconds, st["msgs"],
+                    st["heard"], now - self._last_server_msg)
+                self._stats = dict.fromkeys(st, 0) | {"peak": 0.0}
+                last_beat = now
 
     async def _reconnect_loop(self, client: genai.Client) -> None:
         handle: str | None = None
@@ -278,6 +342,8 @@ class LiveAgent(QObject):
         try:
             while True:
                 async for msg in s.receive():
+                    self._stats["msgs"] += 1
+                    self._last_server_msg = time.monotonic()
                     if msg.session_resumption_update and msg.session_resumption_update.new_handle:
                         handle = msg.session_resumption_update.new_handle
                     if msg.go_away:
@@ -311,6 +377,7 @@ class LiveAgent(QObject):
                 if part.inline_data and part.inline_data.data:
                     self._speaker.play(part.inline_data.data)
         if sc.input_transcription and sc.input_transcription.text:
+            self._stats["heard"] += 1
             self.user_said.emit(sc.input_transcription.text)
             self._set_state(State.THINKING)
         if sc.output_transcription and sc.output_transcription.text:
