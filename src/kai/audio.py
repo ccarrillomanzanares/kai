@@ -42,6 +42,30 @@ def default_devices() -> tuple[str, str]:
     return (sd.query_devices(kind="input")["name"], sd.query_devices(kind="output")["name"])
 
 
+def input_devices() -> list[str]:
+    """Microphone names, once each (Windows lists every device per audio API)."""
+    import sounddevice as sd
+
+    names: dict[str, None] = {}
+    for d in sd.query_devices():
+        if d["max_input_channels"] > 0:
+            names.setdefault(d["name"].strip(), None)
+    return list(names)
+
+
+def _find_input(name: str | None) -> int | None:
+    """Device index for a microphone name; None means the system default."""
+    if not name:
+        return None
+    import sounddevice as sd
+
+    for i, d in enumerate(sd.query_devices()):
+        if d["max_input_channels"] > 0 and d["name"].strip() == name:
+            return i
+    log.warning("Microphone '%s' not found, using the default", name)
+    return None
+
+
 def is_headphones(device_name: str) -> bool:
     return bool(_HEADPHONES.search(device_name))
 
@@ -86,9 +110,10 @@ class _Stream:
 
 
 class Microphone(_Stream):
-    def __init__(self, on_chunk: Callable[[bytes, float], None]):
+    def __init__(self, on_chunk: Callable[[bytes, float], None], device: str | None = None):
         super().__init__()
         self._on_chunk = on_chunk
+        self.device = device  # name from input_devices(); None = system default
 
     def start(self) -> None:
         import sounddevice as sd
@@ -97,7 +122,7 @@ class Microphone(_Stream):
             return
         self._stream = sd.RawInputStream(
             samplerate=IN_RATE, channels=1, dtype="int16", blocksize=IN_BLOCK,
-            callback=self._callback,
+            device=_find_input(self.device), callback=self._callback,
         )
         self._stream.start()
         self.last_callback = time.monotonic()

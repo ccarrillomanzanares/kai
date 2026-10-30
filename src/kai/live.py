@@ -12,6 +12,7 @@ import itertools
 import logging
 import time
 import threading
+from dataclasses import dataclass
 
 from google import genai
 from google.genai import errors, types
@@ -70,6 +71,11 @@ About the kai app itself, so you can help the user with it:
 MAX_BACKOFF = 30
 CONFIRM_TIMEOUT = 120  # seconds before an unanswered confirmation counts as declined
 HEARTBEAT_SECONDS = 60  # how often the log records the health of the session
+VOICED_LEVEL = 0.05  # mic chunks louder than this probably contain speech
+# If the user has spoken this many voiced chunks (50 ms each) and the server has been
+# silent this long, the session is assumed stuck and resumed on a new connection.
+STUCK_VOICED_CHUNKS = 40
+STUCK_SILENCE_SECONDS = 15
 
 
 class State:
@@ -78,6 +84,18 @@ class State:
     LISTENING = "listening"
     THINKING = "thinking"
     SPEAKING = "speaking"
+
+
+@dataclass
+class _Turn:
+    """Content-free facts about the current conversation turn, for the log."""
+
+    user_first: float | None = None
+    user_last: float | None = None
+    reply_started: float | None = None
+    user_chars: int = 0
+    kai_chars: int = 0
+    audio_seconds: float = 0.0
 
 
 class LiveAgent(QObject):
@@ -93,7 +111,7 @@ class LiveAgent(QObject):
     confirm_requested = Signal(int, str, str)  # (request id, title, detail)
 
     def __init__(self, api_key: str, full_duplex: bool | None = None, voice: str | None = None,
-                 accent_instruction: str = ""):
+                 accent_instruction: str = "", microphone: str | None = None):
         super().__init__()
         self._api_key = api_key
         self._voice = voice
@@ -113,11 +131,17 @@ class LiveAgent(QObject):
         self._confirmations: dict[int, tuple[threading.Event, list[bool]]] = {}
         self._confirm_ids = itertools.count(1)
         self._speaker = Speaker(on_level=self._on_speaker_level)
-        self._mic = Microphone(on_chunk=self._on_mic_chunk)
+        self._mic = Microphone(on_chunk=self._on_mic_chunk, device=microphone)
         self._audio_ok = False
         # Content-free counters for the heartbeat log line.
-        self._stats = {"sent": 0, "gated": 0, "muted": 0, "peak": 0.0, "msgs": 0, "heard": 0}
+        self._stats = {"sent": 0, "voiced": 0, "gated": 0, "muted": 0, "peak": 0.0, "msgs": 0,
+                       "heard": 0, "vad": 0}
         self._last_server_msg = time.monotonic()
+        self._voiced_since_msg = 0
+        self._handle: str | None = None  # latest session resumption handle
+        self._reconnect_now: asyncio.Event | None = None
+        self._turn = _Turn()
+        self._user_spoke_at: float | None = None  # last user words, across tool turns
 
     # ---- public API (call from the UI thread) ----
 
@@ -138,15 +162,20 @@ class LiveAgent(QObject):
         self._speaker.stop()
 
     def send_text(self, text: str) -> None:
+        log.info("User typed a message (%d chars)%s", len(text),
+                 "" if self._session else " but there is no session")
         if self._loop and self._session:
             asyncio.run_coroutine_threadsafe(
                 self._session.send_realtime_input(text=text), self._loop
             )
 
     def set_mic_enabled(self, enabled: bool) -> None:
+        if enabled != self._mic_enabled:
+            log.info("Microphone %s by the user", "unmuted" if enabled else "muted")
         self._mic_enabled = enabled
 
     def set_permission_level(self, level: tools.Permission) -> None:
+        log.info("Permission level: %s", level.value)
         self._permission = level
 
     def resolve_confirmation(self, request_id: int, approved: bool) -> None:
@@ -161,10 +190,15 @@ class LiveAgent(QObject):
         request_id = next(self._confirm_ids)
         event, answer = threading.Event(), []
         self._confirmations[request_id] = (event, answer)
+        started = time.monotonic()
+        log.info("Confirmation #%d requested", request_id)
         try:
             self.confirm_requested.emit(request_id, title, detail)
-            approved = event.wait(CONFIRM_TIMEOUT) and bool(answer) and answer[0]
-            approved = approved and not self._stopping
+            answered = event.wait(CONFIRM_TIMEOUT)
+            approved = answered and bool(answer) and answer[0] and not self._stopping
+            log.info("Confirmation #%d %s after %.1fs", request_id,
+                     "approved" if approved else ("declined" if answered else "timed out"),
+                     time.monotonic() - started)
             return bool(approved)
         finally:
             del self._confirmations[request_id]
@@ -183,6 +217,9 @@ class LiveAgent(QObject):
             self._stats["gated"] += 1
             return
         self._stats["sent"] += 1
+        if level > VOICED_LEVEL:
+            self._stats["voiced"] += 1
+            self._voiced_since_msg += 1
         self._stats["peak"] = max(self._stats["peak"], level)
         if self._state in (State.LISTENING, State.THINKING):
             self.level.emit(level)
@@ -205,6 +242,7 @@ class LiveAgent(QObject):
 
     def _set_state(self, state: str) -> None:
         if state != self._state:
+            log.debug("State %s -> %s", self._state, state)
             self._state = state
             self.state_changed.emit(state)
 
@@ -212,6 +250,7 @@ class LiveAgent(QObject):
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
         self._audio_q = asyncio.Queue(maxsize=200)
+        self._reconnect_now = asyncio.Event()
         self._main = self._loop.create_task(self._run())
         try:
             self._loop.run_until_complete(self._main)
@@ -238,6 +277,13 @@ class LiveAgent(QObject):
                 sliding_window=types.SlidingWindow()
             ),
             session_resumption=types.SessionResumptionConfig(handle=handle),
+            # Catch quieter or farther voices than the default detector does.
+            realtime_input_config=types.RealtimeInputConfig(
+                automatic_activity_detection=types.AutomaticActivityDetection(
+                    start_of_speech_sensitivity=types.StartSensitivity.START_SENSITIVITY_HIGH,
+                    prefix_padding_ms=200,
+                )
+            ),
         )
 
     async def _run(self) -> None:
@@ -256,7 +302,7 @@ class LiveAgent(QObject):
             if self._full_duplex is None:
                 self._full_duplex = audio.is_headphones(out_name)
             log.info("Audio: mic '%s', output '%s', headphones mode: %s",
-                     mic_name, out_name, self._full_duplex)
+                     self._mic.device or mic_name, out_name, self._full_duplex)
             self._speaker.start()
             self._mic.start()
             self._audio_ok = True
@@ -290,30 +336,45 @@ class LiveAgent(QObject):
                 log.warning("Audio stalled (%s), restarting audio", ", ".join(stalled))
                 await asyncio.to_thread(self._restart_audio)
             now = time.monotonic()
+            silent = now - self._last_server_msg
+            if (self._session is not None and silent > STUCK_SILENCE_SECONDS
+                    and self._voiced_since_msg >= STUCK_VOICED_CHUNKS):
+                log.warning("Server silent for %.0fs while the user spoke (%d voiced chunks); "
+                            "resuming on a new connection", silent, self._voiced_since_msg)
+                self._voiced_since_msg = 0
+                self._reconnect_now.set()
             if now - last_beat >= HEARTBEAT_SECONDS:
                 st = self._stats
                 log.info(
-                    "Heartbeat: state=%s connected=%s mic_sent=%d mic_gated=%d mic_muted=%d "
-                    "mic_peak=%.2f speaker_buffer=%.1fs server_msgs=%d speech_heard=%d "
-                    "last_server_msg=%.0fs ago",
-                    self._state, self._session is not None, st["sent"], st["gated"],
-                    st["muted"], st["peak"], self._speaker.buffered_seconds, st["msgs"],
-                    st["heard"], now - self._last_server_msg)
+                    "Heartbeat: state=%s connected=%s mic_sent=%d mic_voiced=%d mic_gated=%d "
+                    "mic_muted=%d mic_peak=%.2f speaker_buffer=%.1fs "
+                    "server_msgs=%d server_vad=%d speech_heard=%d last_server_msg=%.0fs ago",
+                    self._state, self._session is not None, st["sent"], st["voiced"],
+                    st["gated"], st["muted"], st["peak"],
+                    self._speaker.buffered_seconds, st["msgs"], st["vad"], st["heard"],
+                    now - self._last_server_msg)
                 self._stats = dict.fromkeys(st, 0) | {"peak": 0.0}
                 last_beat = now
 
     async def _reconnect_loop(self, client: genai.Client) -> None:
-        handle: str | None = None
         backoff = 1
         while not self._stopping:
             self._set_state(State.CONNECTING)
+            resumed = False
             try:
-                async with client.aio.live.connect(model=MODEL, config=self._config(handle)) as s:
+                config = self._config(self._handle)
+                async with client.aio.live.connect(model=MODEL, config=config) as s:
                     self._session = s
-                    log.info("Connected to %s (resumed: %s)", MODEL, handle is not None)
+                    self._last_server_msg = time.monotonic()
+                    self._voiced_since_msg = 0
+                    log.info("Connected to %s (resumed: %s)", MODEL, self._handle is not None)
                     self._set_state(State.LISTENING)
                     backoff = 1
-                    handle = await self._serve(s, handle)
+                    opened = time.monotonic()
+                    try:
+                        resumed = await self._serve_until_reconnect(s)
+                    finally:
+                        log.info("Connection closed after %.0fs", time.monotonic() - opened)
             except errors.APIError as e:
                 detail = e.message or str(e)
                 log.warning("Live API error %s: %s", e.code, detail)
@@ -330,25 +391,59 @@ class LiveAgent(QObject):
                 self.error.emit(f"Connection lost: {e}")
             finally:
                 self._session = None
-            if not self._stopping:
+            if not self._stopping and not resumed:
                 self._set_state(State.CONNECTING)
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, MAX_BACKOFF)
 
-    async def _serve(self, s, handle: str | None) -> str | None:
-        """Run one connection until it closes. Returns the latest resumption handle."""
+    async def _serve_until_reconnect(self, s) -> bool:
+        """Serve the connection until it ends. True if the watchdog asked to reconnect."""
+        assert self._reconnect_now is not None
+        self._reconnect_now.clear()
+        serve = asyncio.create_task(self._serve(s))
+        wake = asyncio.create_task(self._reconnect_now.wait())
+        try:
+            done, _ = await asyncio.wait({serve, wake}, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            wake.cancel()
+        if serve in done:
+            serve.result()  # re-raise connection errors
+            return True  # GoAway: reconnect right away
+        serve.cancel()
+        try:
+            await serve
+        except asyncio.CancelledError:
+            pass
+        return True
+
+    async def _serve(self, s) -> None:
+        """Run one connection until it closes or the server asks to reconnect."""
         sender = asyncio.create_task(self._pump_audio(s))
         tool_tasks: set[asyncio.Task] = set()
         try:
             while True:
                 async for msg in s.receive():
                     self._stats["msgs"] += 1
+                    self._stats["vad"] += bool(msg.voice_activity_detection_signal
+                                               or msg.voice_activity)
                     self._last_server_msg = time.monotonic()
+                    self._voiced_since_msg = 0
                     if msg.session_resumption_update and msg.session_resumption_update.new_handle:
-                        handle = msg.session_resumption_update.new_handle
+                        self._handle = msg.session_resumption_update.new_handle
+                    if msg.voice_activity_detection_signal:
+                        log.debug("Server VAD signal: %s",
+                                  msg.voice_activity_detection_signal.vad_signal_type)
+                    if msg.voice_activity:
+                        log.debug("Server voice activity: %s",
+                                  msg.voice_activity.voice_activity_type)
+                    if msg.usage_metadata and msg.usage_metadata.total_token_count:
+                        log.debug("Usage: %s tokens", msg.usage_metadata.total_token_count)
+                    if msg.tool_call_cancellation:
+                        log.info("Server cancelled %d tool call(s)",
+                                 len(msg.tool_call_cancellation.ids or []))
                     if msg.go_away:
                         log.info("Server asked to reconnect (time left: %s)", msg.go_away.time_left)
-                        return handle
+                        return
                     if msg.tool_call:
                         # Run tools in the background: a confirmation can take a while
                         # and audio must keep flowing meanwhile.
@@ -370,19 +465,46 @@ class LiveAgent(QObject):
             await s.send_realtime_input(audio=types.Blob(data=pcm, mime_type=mime))
 
     def _handle_content(self, sc: types.LiveServerContent) -> None:
+        turn = self._turn
+        now = time.monotonic()
         if sc.interrupted:
+            log.info("kai interrupted after %.1fs of reply audio (%.1fs still queued)",
+                     turn.audio_seconds, self._speaker.buffered_seconds)
             self._speaker.clear()
         if sc.model_turn:
             for part in sc.model_turn.parts or []:
                 if part.inline_data and part.inline_data.data:
+                    if turn.reply_started is None:
+                        turn.reply_started = now
+                        if self._user_spoke_at is not None:
+                            log.info("kai started replying %.2fs after the user's last words",
+                                     now - self._user_spoke_at)
+                            self._user_spoke_at = None
+                        else:
+                            log.info("kai started speaking on its own")
+                    turn.audio_seconds += len(part.inline_data.data) / (audio.OUT_RATE * 2)
                     self._speaker.play(part.inline_data.data)
         if sc.input_transcription and sc.input_transcription.text:
             self._stats["heard"] += 1
+            if turn.user_first is None:
+                turn.user_first = now
+                log.info("Server is hearing the user")
+            turn.user_last = self._user_spoke_at = now
+            turn.user_chars += len(sc.input_transcription.text)
             self.user_said.emit(sc.input_transcription.text)
             self._set_state(State.THINKING)
         if sc.output_transcription and sc.output_transcription.text:
+            turn.kai_chars += len(sc.output_transcription.text)
             self.kai_said.emit(sc.output_transcription.text)
+        if sc.generation_complete:
+            log.debug("Generation complete")
+        if sc.waiting_for_input:
+            log.debug("Server waiting for input")
         if sc.turn_complete:
+            log.info("Turn complete (reason: %s): user %d chars, kai %d chars, %.1fs of audio",
+                     sc.turn_complete_reason or "-", turn.user_chars, turn.kai_chars,
+                     turn.audio_seconds)
+            self._turn = _Turn()
             self.turn_done.emit()
             if not self._speaker.is_playing:
                 self._set_state(State.LISTENING)
@@ -393,11 +515,14 @@ class LiveAgent(QObject):
         for fc in tool_call.function_calls or []:
             args = dict(fc.args or {})
             self.tool_used.emit(fc.name, args)
+            started = time.monotonic()
+            log.debug("Tool %s started", fc.name)
             result = await asyncio.to_thread(tools.call, fc.name, args, self._confirm,
                                              self._permission)
             if tools.is_ui_action(fc.name):
                 self.ui_action.emit(fc.name)
-            log.info("Tool %s: %s", fc.name, "error" if "error" in result else "ok")
+            log.info("Tool %s: %s in %.2fs", fc.name, "error" if "error" in result else "ok",
+                     time.monotonic() - started)
             responses.append(types.FunctionResponse(id=fc.id, name=fc.name, response=result))
         if responses:
             await s.send_tool_response(function_responses=responses)

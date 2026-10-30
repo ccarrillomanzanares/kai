@@ -39,7 +39,12 @@ def log_file() -> Path:
     return path / "kai.log"
 
 
-def setup() -> None:
+def set_detailed(detailed: bool) -> None:
+    """Detailed logs add frequent events (state changes, server signals) at DEBUG level."""
+    logging.getLogger("kai").setLevel(logging.DEBUG if detailed else logging.INFO)
+
+
+def setup(detailed: bool = False) -> None:
     formatter = _RedactingFormatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
     file_handler = RotatingFileHandler(log_file(), maxBytes=1_000_000, backupCount=2, encoding="utf-8")
     console = logging.StreamHandler()
@@ -50,8 +55,32 @@ def setup() -> None:
     for name in ("httpx", "httpcore", "websockets", "google_genai"):
         logging.getLogger(name).setLevel(logging.WARNING)
 
+    logging.getLogger().handlers[0].setLevel(logging.DEBUG)
+    console.setLevel(logging.INFO)  # the terminal stays readable; details go to the file
+    set_detailed(detailed)
+
     def excepthook(exc_type, exc, tb):
+        if issubclass(exc_type, KeyboardInterrupt):
+            return  # Ctrl+C in the terminal: handled as a normal quit
         logging.getLogger("kai").critical("Unhandled exception", exc_info=(exc_type, exc, tb))
         sys.__excepthook__(exc_type, exc, tb)
 
     sys.excepthook = excepthook
+
+
+def route_qt_messages() -> None:
+    """Send Qt's own warnings to the log instead of the bare terminal."""
+    from PySide6.QtCore import QtMsgType, qInstallMessageHandler
+
+    qt_log = logging.getLogger("kai.qt")
+    levels = {QtMsgType.QtDebugMsg: logging.DEBUG, QtMsgType.QtInfoMsg: logging.DEBUG,
+              QtMsgType.QtWarningMsg: logging.WARNING, QtMsgType.QtCriticalMsg: logging.ERROR,
+              QtMsgType.QtFatalMsg: logging.CRITICAL}
+
+    def handler(msg_type, context, message):
+        level = levels.get(msg_type, logging.WARNING)
+        if "setPointSize" in message:  # harmless: stylesheets size fonts in pixels
+            level = logging.DEBUG
+        qt_log.log(level, "%s", message)
+
+    qInstallMessageHandler(handler)

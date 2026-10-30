@@ -86,6 +86,12 @@ QToolTip {{
     border-radius: 6px;
     padding: 6px 8px;
 }}
+QCheckBox {{ spacing: 8px; color: {MUTED}; }}
+QCheckBox::indicator {{
+    width: 14px; height: 14px; border-radius: 4px;
+    border: 1px solid {BORDER}; background: {SURFACE};
+}}
+QCheckBox::indicator:checked {{ background: {ACCENT}; border-color: {ACCENT}; }}
 QPushButton {{
     background: {SURFACE};
     border: 1px solid {BORDER};

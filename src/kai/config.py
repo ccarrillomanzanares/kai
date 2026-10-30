@@ -105,7 +105,10 @@ def validate_api_key(key: str) -> str | None:
 
 # ---- settings ----
 
-DEFAULT_SETTINGS = {"voice": None, "accent": "auto", "custom_accent": "", "permissions": "balanced"}
+DEFAULT_SETTINGS = {
+    "voice": None, "accent": "auto", "custom_accent": "", "permissions": "balanced",
+    "microphone": None, "detailed_logs": True,
+}
 
 
 def _settings_file() -> Path:

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import logging
+import signal
 import sys
 
 from PySide6.QtCore import QTimer
@@ -39,6 +41,7 @@ class Controller:
         settings = config.load_settings()
         self.agent = a = LiveAgent(
             key,
+            microphone=settings["microphone"],
             voice=settings["voice"],
             accent_instruction=voices.accent_instruction(settings["accent"],
                                                          settings["custom_accent"]),
@@ -72,10 +75,14 @@ class Controller:
         dialog = SettingsDialog(self.window)
         if dialog.exec() != QDialog.Accepted or not self.agent:
             return
+        after = config.load_settings()
+        changed = sorted(k for k in after if after[k] != before.get(k))
+        logging.getLogger("kai").info("Settings changed: %s", ", ".join(changed) or "nothing")
+        logs.set_detailed(after["detailed_logs"])
         if dialog.voice_changed(before):
-            self.start_agent()  # voice and accent are fixed per session
+            self.start_agent()  # voice, accent and microphone are fixed per session
         else:
-            self.agent.set_permission_level(Permission(config.load_settings()["permissions"]))
+            self.agent.set_permission_level(Permission(after["permissions"]))
 
     def open_diagnostics(self) -> None:
         DiagDialog(self.window).exec()
@@ -117,13 +124,17 @@ def send_diagnostics() -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(prog="kai", description="Voice assistant for your computer.")
     parser.add_argument("--version", action="version", version=f"kai {__version__}")
+    parser.add_argument("--debug", action="store_true", help="detailed logs for this run")
     parser.add_argument("--send-diagnostics", action="store_true",
                         help="upload logs and system info (no conversations, no API key) and exit")
     opts, qt_args = parser.parse_known_args()
 
-    logs.setup()
+    logs.setup(detailed=opts.debug or config.load_settings()["detailed_logs"])
     if opts.send_diagnostics:
         return send_diagnostics()
+    logs.route_qt_messages()
+    # Let Ctrl+C in the terminal quit cleanly: Python only sees signals between Qt events.
+    signal.signal(signal.SIGINT, lambda *_: QApplication.quit())
 
     app = QApplication(sys.argv[:1] + qt_args)
     app.setApplicationName("kai")
@@ -131,6 +142,10 @@ def main() -> int:
     app.setStyleSheet(STYLESHEET)
     app.setWindowIcon(app_icon())
     app.setQuitOnLastWindowClosed(False)  # dialogs closing must not quit; use "Quit kai"
+
+    heartbeat = QTimer(interval=250)  # wakes Python up so it can handle Ctrl+C
+    heartbeat.timeout.connect(lambda: None)
+    heartbeat.start()
 
     window = MainWindow()
     controller = Controller(window)

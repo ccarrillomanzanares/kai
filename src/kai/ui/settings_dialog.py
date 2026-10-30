@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDialog,
     QFormLayout,
@@ -13,7 +14,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from kai import config
+from kai import audio, config
 from kai.tools import PERMISSION_LABELS, Permission
 from kai.voices import ACCENTS, AUTO, CUSTOM, VOICES
 
@@ -58,16 +59,32 @@ class SettingsDialog(QDialog):
         self.permissions.currentIndexChanged.connect(self._sync)
         self.permission_hint = QLabel(objectName="muted", wordWrap=True)
 
+        self.microphone = QComboBox()
+        self.microphone.addItem("System default", None)
+        try:
+            for name in audio.input_devices():
+                self.microphone.addItem(name, name)
+        except Exception:  # no audio system: keep just the default
+            pass
+        self.microphone.setCurrentIndex(
+            max(0, self.microphone.findData(self._settings["microphone"])))
+
+        self.detailed_logs = QCheckBox("Detailed logs (to help fix problems)")
+        self.detailed_logs.setChecked(self._settings["detailed_logs"])
+
         form = QFormLayout()
         form.setSpacing(12)
+        form.addRow("Microphone", self.microphone)
         form.addRow("Voice", self.voice)
         form.addRow("Accent", self.accent)
         form.addRow("", self.custom)
         form.addRow("Permissions", self.permissions)
         form.addRow("", self.permission_hint)
+        form.addRow("", self.detailed_logs)
 
-        hint = QLabel("You can listen to every voice in Google AI Studio. Changing the voice "
-                      "or accent starts a new conversation.", objectName="muted", wordWrap=True)
+        hint = QLabel("You can listen to every voice in Google AI Studio. Changing the "
+                      "microphone, voice or accent starts a new conversation.",
+                      objectName="muted", wordWrap=True)
 
         cancel = QPushButton("Cancel")
         cancel.clicked.connect(self.reject)
@@ -93,7 +110,7 @@ class SettingsDialog(QDialog):
         self.permission_hint.setText(PERMISSION_HINTS[Permission(self.permissions.currentData())])
 
     def voice_changed(self, before: dict) -> bool:
-        keys = ("voice", "accent", "custom_accent")
+        keys = ("voice", "accent", "custom_accent", "microphone")
         return any(before[k] != self._settings[k] for k in keys)
 
     def _save(self) -> None:
@@ -102,6 +119,8 @@ class SettingsDialog(QDialog):
             accent=self.accent.currentData(),
             custom_accent=self.custom.text().strip(),
             permissions=self.permissions.currentData(),
+            microphone=self.microphone.currentData(),
+            detailed_logs=self.detailed_logs.isChecked(),
         )
         config.save_settings(self._settings)
         self.accept()
