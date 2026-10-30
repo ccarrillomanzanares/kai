@@ -9,6 +9,7 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication, QDialog
 
 from kai import __version__, config, diag, logs
+from kai.ui.confirm_dialog import ConfirmDialog
 from kai.ui.diag_dialog import DiagDialog
 from kai.ui.main_window import MainWindow
 from kai.ui.onboarding import OnboardingDialog
@@ -39,6 +40,7 @@ class Controller:
         a.error.connect(self.window.show_notice)
         a.fatal_error.connect(self._on_fatal)
         a.ui_action.connect(self._on_ui_action)
+        a.confirm_requested.connect(lambda rid, title, detail: self._on_confirm_requested(a, rid, title, detail))
         a.set_mic_enabled(self.window.mic_btn.isChecked())
         a.start()
 
@@ -56,6 +58,12 @@ class Controller:
 
     def open_diagnostics(self) -> None:
         DiagDialog(self.window).exec()
+
+    def _on_confirm_requested(self, agent, request_id: int, title: str, detail: str) -> None:
+        self.window.raise_()
+        self.window.activateWindow()
+        approved = ConfirmDialog(title, detail, self.window).exec() == QDialog.Accepted
+        agent.resolve_confirmation(request_id, approved)
 
     def _on_ui_action(self, name: str) -> None:
         if name == "open_diagnostics":

@@ -8,6 +8,7 @@ the UI only through Qt signals.
 from __future__ import annotations
 
 import asyncio
+import itertools
 import logging
 import threading
 
@@ -27,6 +28,14 @@ You are kai, a calm and concise voice assistant that helps the user manage their
 - Keep spoken answers short; offer details only if asked.
 - Use your tools to inspect or act on the computer instead of guessing.
 - Never claim you did something on the computer unless a tool confirmed it.
+- You can do much more than your specific tools: for anything they don't cover
+  (settings, network, installed software, moving or renaming files, etc.) use run_command
+  with a command for the user's operating system. Don't tell the user you can't do
+  something on the computer before considering run_command.
+- run_command and kill_process show the user a confirmation window. Tell them briefly
+  that you're asking for permission. If they decline, accept it and don't insist.
+- Prefer read-only commands to look before changing anything. Never run destructive
+  commands (deleting, formatting, uninstalling) unless the user explicitly asked for it.
 
 About the kai app itself, so you can help the user with it:
 - kai is a small desktop app for Linux, Windows and macOS: a glowing orb, a transcript and
@@ -46,6 +55,7 @@ About the kai app itself, so you can help the user with it:
 """
 
 MAX_BACKOFF = 30
+CONFIRM_TIMEOUT = 120  # seconds before an unanswered confirmation counts as declined
 
 
 class State:
@@ -66,6 +76,7 @@ class LiveAgent(QObject):
     fatal_error = Signal(str)  # e.g. invalid API key; the agent has stopped
     tool_used = Signal(str, dict)
     ui_action = Signal(str)  # a tool asked the app to do something in the UI
+    confirm_requested = Signal(int, str, str)  # (request id, title, detail)
 
     def __init__(self, api_key: str, full_duplex: bool = False):
         super().__init__()
@@ -79,6 +90,8 @@ class LiveAgent(QObject):
         self._session = None
         self._stopping = False
         self._state = State.OFFLINE
+        self._confirmations: dict[int, tuple[threading.Event, list[bool]]] = {}
+        self._confirm_ids = itertools.count(1)
         self._speaker = Speaker(on_level=self._on_speaker_level)
         self._mic = Microphone(on_chunk=self._on_mic_chunk)
 
@@ -91,6 +104,8 @@ class LiveAgent(QObject):
 
     def stop(self) -> None:
         self._stopping = True
+        for event, _ in list(self._confirmations.values()):
+            event.set()  # unblock pending confirmations as declined
         if self._loop and self._main:
             self._loop.call_soon_threadsafe(self._main.cancel)
         if self._thread:
@@ -106,6 +121,26 @@ class LiveAgent(QObject):
 
     def set_mic_enabled(self, enabled: bool) -> None:
         self._mic_enabled = enabled
+
+    def resolve_confirmation(self, request_id: int, approved: bool) -> None:
+        if entry := self._confirmations.get(request_id):
+            entry[1].append(approved)
+            entry[0].set()
+
+    # ---- confirmations (tool worker threads) ----
+
+    def _confirm(self, title: str, detail: str) -> bool:
+        """Ask the UI to approve a sensitive action and wait for the answer."""
+        request_id = next(self._confirm_ids)
+        event, answer = threading.Event(), []
+        self._confirmations[request_id] = (event, answer)
+        try:
+            self.confirm_requested.emit(request_id, title, detail)
+            approved = event.wait(CONFIRM_TIMEOUT) and bool(answer) and answer[0]
+            approved = approved and not self._stopping
+            return bool(approved)
+        finally:
+            del self._confirmations[request_id]
 
     # ---- audio callbacks (audio threads) ----
 
@@ -216,6 +251,7 @@ class LiveAgent(QObject):
     async def _serve(self, s, handle: str | None) -> str | None:
         """Run one connection until it closes. Returns the latest resumption handle."""
         sender = asyncio.create_task(self._pump_audio(s))
+        tool_tasks: set[asyncio.Task] = set()
         try:
             while True:
                 async for msg in s.receive():
@@ -225,11 +261,17 @@ class LiveAgent(QObject):
                         log.info("Server asked to reconnect (time left: %s)", msg.go_away.time_left)
                         return handle
                     if msg.tool_call:
-                        await self._handle_tool_call(s, msg.tool_call)
+                        # Run tools in the background: a confirmation can take a while
+                        # and audio must keep flowing meanwhile.
+                        task = asyncio.create_task(self._handle_tool_call(s, msg.tool_call))
+                        tool_tasks.add(task)
+                        task.add_done_callback(tool_tasks.discard)
                     if msg.server_content:
                         self._handle_content(msg.server_content)
         finally:
             sender.cancel()
+            for task in tool_tasks:
+                task.cancel()
 
     async def _pump_audio(self, s) -> None:
         assert self._audio_q is not None
@@ -261,7 +303,7 @@ class LiveAgent(QObject):
         for fc in tool_call.function_calls or []:
             args = dict(fc.args or {})
             self.tool_used.emit(fc.name, args)
-            result = await asyncio.to_thread(tools.call, fc.name, args)
+            result = await asyncio.to_thread(tools.call, fc.name, args, self._confirm)
             if tools.is_ui_action(fc.name):
                 self.ui_action.emit(fc.name)
             log.info("Tool %s: %s", fc.name, "error" if "error" in result else "ok")
