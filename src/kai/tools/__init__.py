@@ -84,5 +84,6 @@ def call(name: str, args: dict[str, Any] | None) -> dict[str, Any]:
     try:
         return {"result": tool.func(**(args or {}))}
     except Exception as e:
-        log.exception("Tool %s failed", name)
+        # Only the exception type: messages can echo the user's arguments.
+        log.warning("Tool %s raised %s", name, type(e).__name__)
         return {"error": str(e)}

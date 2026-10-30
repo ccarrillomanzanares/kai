@@ -171,11 +171,13 @@ class LiveAgent(QObject):
             try:
                 async with client.aio.live.connect(model=MODEL, config=self._config(handle)) as s:
                     self._session = s
+                    log.info("Connected to %s (resumed: %s)", MODEL, handle is not None)
                     self._set_state(State.LISTENING)
                     backoff = 1
                     handle = await self._serve(s, handle)
             except errors.APIError as e:
                 detail = e.message or str(e)
+                log.warning("Live API error %s: %s", e.code, detail)
                 if e.code in (1008, 400, 401, 403):
                     self.fatal_error.emit(detail or "Google rejected the API key.")
                     return
@@ -243,6 +245,7 @@ class LiveAgent(QObject):
             args = dict(fc.args or {})
             self.tool_used.emit(fc.name, args)
             result = await asyncio.to_thread(tools.call, fc.name, args)
+            log.info("Tool %s: %s", fc.name, "error" if "error" in result else "ok")
             responses.append(types.FunctionResponse(id=fc.id, name=fc.name, response=result))
         if responses:
             await s.send_tool_response(function_responses=responses)

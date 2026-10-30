@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-import logging
+import argparse
 import sys
 
 from PySide6.QtWidgets import QApplication, QDialog
 
-from kai import __version__, config
+from kai import __version__, config, diag, logs
+from kai.ui.diag_dialog import DiagDialog
 from kai.ui.main_window import MainWindow
 from kai.ui.onboarding import OnboardingDialog
 from kai.ui.theme import STYLESHEET
@@ -20,6 +21,7 @@ class Controller:
         window.text_submitted.connect(self._send_text)
         window.mic_toggled.connect(self._toggle_mic)
         window.change_key_requested.connect(self.change_key)
+        window.diagnostics_requested.connect(lambda: DiagDialog(window).exec())
 
     def start_agent(self) -> None:
         from kai.live import LiveAgent
@@ -65,9 +67,28 @@ class Controller:
             self.agent.set_mic_enabled(on)
 
 
+def send_diagnostics() -> int:
+    try:
+        report_id = diag.upload(diag.collect())
+    except RuntimeError as e:
+        print(e, file=sys.stderr)
+        return 1
+    print(f"Diagnostics sent. Reference: {report_id}")
+    return 0
+
+
 def main() -> int:
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
-    app = QApplication(sys.argv)
+    parser = argparse.ArgumentParser(prog="kai", description="Voice assistant for your computer.")
+    parser.add_argument("--version", action="version", version=f"kai {__version__}")
+    parser.add_argument("--send-diagnostics", action="store_true",
+                        help="upload logs and system info (no conversations, no API key) and exit")
+    opts, qt_args = parser.parse_known_args()
+
+    logs.setup()
+    if opts.send_diagnostics:
+        return send_diagnostics()
+
+    app = QApplication(sys.argv[:1] + qt_args)
     app.setApplicationName("kai")
     app.setApplicationVersion(__version__)
     app.setStyleSheet(STYLESHEET)

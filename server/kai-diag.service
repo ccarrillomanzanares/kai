@@ -1,0 +1,21 @@
+# kai diagnostics receiver on the VPS. Install:
+#   sudo install -m 644 server/kai-diag.service /etc/systemd/system/
+#   sudo systemctl enable --now kai-diag
+# Apache (ccmai.org vhost on 443):
+#   ProxyPass        /kai-diag/ http://127.0.0.1:8092/kai-diag/
+#   ProxyPassReverse /kai-diag/ http://127.0.0.1:8092/kai-diag/
+[Unit]
+Description=kai diagnostics receiver
+After=network.target
+
+[Service]
+User=ccmai
+ExecStart=/usr/bin/python3 -I /home/ccmai/kai/server/diag_server.py --dir /home/ccmai/kai-diag
+Restart=on-failure
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/home/ccmai/kai-diag
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
