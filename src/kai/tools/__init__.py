@@ -89,8 +89,9 @@ TOOLS: dict[str, Tool] = {
              _params(["url"], url=("string", "Absolute http(s) URL.")),
              system.open_url, Risk.SAFE),
         Tool("open_app",
-             "Launch an application by name, e.g. 'notepad', 'calculator', 'firefox', 'Spotify'.",
-             _params(["name"], name=("string", "Application name.")),
+             "Launch an installed application by name, including Microsoft Store apps on "
+             "Windows. App names are usually in the system's language (e.g. 'Calculadora').",
+             _params(["name"], name=("string", "Application name, e.g. 'Spotify', 'WhatsApp'.")),
              apps.open_app, Risk.SAFE),
         Tool("open_path",
              "Open a file with its default application, or a folder in the file manager.",

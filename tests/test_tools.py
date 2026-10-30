@@ -68,3 +68,42 @@ def test_sensitive_tools_need_confirmation():
 def test_list_processes():
     procs = tools.call("list_processes", {"sort_by": "cpu", "limit": 3})["result"]
     assert 1 <= len(procs) <= 3 and {"pid", "name", "memory_mb", "cpu_percent"} <= procs[0].keys()
+
+
+@pytest.mark.parametrize(
+    "spoken, expected",
+    [
+        ("spotify", "Spotify"),  # exact, case-insensitive
+        ("whats", "WhatsApp"),  # prefix
+        ("word", "Microsoft Word"),  # substring
+        ("calculator", "Calculadora"),  # fuzzy, localized name
+        ("photoshop", None),
+    ],
+)
+def test_match_app(spoken, expected):
+    from kai.tools.apps import match_app
+
+    start_menu = {n: f"id.{n}" for n in
+                  ["Spotify", "WhatsApp", "Microsoft Word", "Calculadora", "Bloc de notas"]}
+    assert match_app(spoken, start_menu) == expected
+
+
+def test_open_windows_app_uses_start_menu_app_id(monkeypatch):
+    import json
+    import subprocess
+
+    from kai.tools import apps
+
+    start_apps = [{"Name": "WhatsApp", "AppID": "5319275A.WhatsAppDesktop_cv1g1gvanyjgm!App"},
+                  {"Name": "Calculadora", "AppID": "Microsoft.WindowsCalculator_8wekyb3d8bbwe!App"}]
+    monkeypatch.setattr(subprocess, "CREATE_NO_WINDOW", 0, raising=False)
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(
+        a, 0, stdout=json.dumps(start_apps)))
+    launched = []
+    monkeypatch.setattr(apps, "_detached", launched.append)
+    monkeypatch.setattr(apps, "_start_apps", (0.0, {}))
+
+    assert apps._open_windows_app("whatsapp") == "Launched WhatsApp"
+    assert launched == [["explorer.exe", "shell:AppsFolder\\5319275A.WhatsAppDesktop_cv1g1gvanyjgm!App"]]
+    with pytest.raises(FileNotFoundError, match="Similar apps: Calculadora"):
+        apps._open_windows_app("calculadoro pro max")

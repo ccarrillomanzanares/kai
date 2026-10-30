@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import difflib
+import json
 import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
+
+START_APPS_TTL = 300  # seconds to cache the Windows Start menu app list
+_start_apps: tuple[float, dict[str, str]] = (0.0, {})
 
 
 def _detached(cmd: list[str]) -> None:
@@ -50,11 +56,61 @@ def _linux_desktop_entry(name: str) -> str | None:
     return None
 
 
-def open_app(name: str) -> str:
-    if sys.platform == "win32":
-        # `start` resolves registered apps (notepad, calc, chrome, ms-settings:, …).
+def match_app(name: str, apps: dict[str, str]) -> str | None:
+    """Pick the best app for a spoken name: exact, then prefix, then substring, then fuzzy."""
+    wanted = name.lower().strip()
+    names = {n.lower(): n for n in apps}
+    if wanted in names:
+        return names[wanted]
+    for test in (str.startswith, lambda n, w: w in n):
+        hits = sorted((n for n in names if test(n, wanted)), key=len)
+        if hits:
+            return names[hits[0]]
+    close = difflib.get_close_matches(wanted, names, n=1, cutoff=0.75)
+    return names[close[0]] if close else None
+
+
+def _windows_start_apps() -> dict[str, str]:
+    """Name -> AppID of every app in the Start menu, desktop and Microsoft Store alike."""
+    global _start_apps
+    fetched, apps = _start_apps
+    if apps and time.monotonic() - fetched < START_APPS_TTL:
+        return apps
+    script = ("[Console]::OutputEncoding = [Text.Encoding]::UTF8; "
+              "Get-StartApps | Select-Object Name, AppID | ConvertTo-Json -Compress")
+    out = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+                         capture_output=True, text=True, encoding="utf-8", errors="replace",
+                         timeout=20, creationflags=subprocess.CREATE_NO_WINDOW).stdout
+    items = json.loads(out or "[]")
+    if isinstance(items, dict):  # a single app is not wrapped in a list
+        items = [items]
+    apps = {i["Name"]: i["AppID"] for i in items if i.get("Name") and i.get("AppID")}
+    _start_apps = (time.monotonic(), apps)
+    return apps
+
+
+def _open_windows_app(name: str) -> str:
+    try:
+        apps = _windows_start_apps()
+    except (OSError, ValueError, subprocess.SubprocessError):
+        apps = {}
+    if match := match_app(name, apps):
+        # shell:AppsFolder launches both classic and Microsoft Store apps by AppID.
+        _detached(["explorer.exe", f"shell:AppsFolder\\{apps[match]}"])
+        return f"Launched {match}"
+    if shutil.which(name):
+        # Not in the Start menu but on PATH (notepad, calc, …).
         subprocess.run(["cmd", "/c", "start", "", name], check=True,
                        creationflags=subprocess.CREATE_NO_WINDOW)
+        return f"Launched {name}"
+    similar = difflib.get_close_matches(name, list(apps), n=5, cutoff=0.4)
+    hint = f" Similar apps: {', '.join(similar)}." if similar else ""
+    raise FileNotFoundError(f"No application found for '{name}'.{hint}")
+
+
+def open_app(name: str) -> str:
+    if sys.platform == "win32":
+        return _open_windows_app(name)
     elif sys.platform == "darwin":
         subprocess.run(["open", "-a", name], check=True, capture_output=True)
     else:
