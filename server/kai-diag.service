@@ -1,4 +1,4 @@
-# kai diagnostics receiver on the VPS. Install:
+# kai diagnostics receiver on the VPS. Install with server/install.sh, or by hand:
 #   sudo install -m 644 server/kai-diag.service /etc/systemd/system/
 #   sudo systemctl enable --now kai-diag
 # Apache (ccmai.org vhost on 443):
