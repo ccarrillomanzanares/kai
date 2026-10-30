@@ -62,6 +62,30 @@ QComboBox QAbstractItemView {{
     outline: none;
     padding: 4px;
 }}
+QMenu {{
+    background: {SURFACE};
+    border: 1px solid {BORDER};
+    border-radius: 10px;
+    padding: 6px;
+}}
+QMenu::item {{
+    padding: 8px 18px;
+    border-radius: 6px;
+    color: {TEXT};
+}}
+QMenu::item:selected {{ background: {BORDER}; }}
+QMenu::separator {{
+    height: 1px;
+    background: {BORDER};
+    margin: 6px 8px;
+}}
+QToolTip {{
+    background: {SURFACE};
+    color: {TEXT};
+    border: 1px solid {BORDER};
+    border-radius: 6px;
+    padding: 6px 8px;
+}}
 QPushButton {{
     background: {SURFACE};
     border: 1px solid {BORDER};
