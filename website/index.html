@@ -21,9 +21,7 @@
 
   <main>
     <section class="wrap hero">
-      <div class="scanner" aria-hidden="true">
-        <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
-      </div>
+      <div class="lightline" aria-hidden="true"><span class="glow"></span></div>
       <h1>Talk to your computer.</h1>
       <p class="lead">kai is a calm voice assistant that helps you manage your computer.
         Ask, and it listens, looks and acts. In your language.</p>
@@ -59,7 +57,7 @@
         </article>
         <article>
           <h3>Out of your way</h3>
-          <p>One slim bar above your taskbar. Click it to see the conversation. No clutter, no accounts, no tracking.</p>
+          <p>A slim line of light above your taskbar that glows when it listens and moves when it speaks. Click it to see the conversation.</p>
         </article>
       </div>
     </section>
@@ -96,26 +94,5 @@ kai</code></pre>
     <a href="https://github.com/ccarrillomanzanares/kai">GitHub</a>
   </footer>
 
-  <script>
-    // The scanner from the app: a light sweeping back and forth, leaving a trail.
-    (() => {
-      const leds = [...document.querySelectorAll(".scanner i")];
-      if (!leds.length || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-      const values = leds.map(() => 0), sweepsPerSecond = 0.55, decay = 0.88;
-      let phase = 0, last = performance.now();
-      function frame(now) {
-        phase = (phase + (now - last) / 1000 * sweepsPerSecond) % 1;
-        last = now;
-        const pos = (1 - Math.cos(phase * 2 * Math.PI)) / 2 * (leds.length - 1);
-        const i = Math.floor(pos), frac = pos - i;
-        for (let k = 0; k < values.length; k++) values[k] *= decay;
-        values[i] = Math.max(values[i], 1 - frac);
-        if (i + 1 < values.length) values[i + 1] = Math.max(values[i + 1], frac);
-        leds.forEach((led, k) => led.style.setProperty("--v", values[k].toFixed(3)));
-        requestAnimationFrame(frame);
-      }
-      requestAnimationFrame(frame);
-    })();
-  </script>
 </body>
 </html>

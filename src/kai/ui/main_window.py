@@ -1,6 +1,6 @@
-"""The main window: a slim floating bar with the scanner, docked above the taskbar.
+"""The main window: a slim floating capsule with the light line, docked above the taskbar.
 
-Clicking the scanner unfolds a panel upwards with the transcript and a text field.
+Clicking the line unfolds a panel upwards with the transcript and a text field.
 """
 
 from __future__ import annotations
@@ -20,8 +20,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from kai.ui.scanner import Scanner
-from kai.ui.theme import BG, BORDER, MUTED, TEXT
+from kai.ui.lightline import LightLine
+from kai.ui.theme import BG, MUTED, TEXT
 
 STATE_LABELS = {
     "offline": "offline",
@@ -31,8 +31,8 @@ STATE_LABELS = {
     "speaking": "speaking",
 }
 
-WIDTH = 420
-BAR_HEIGHT = 46
+WIDTH = 340
+BAR_HEIGHT = 40
 PANEL_HEIGHT = 300
 DOCK_MARGIN = 12
 DRAG_THRESHOLD = 4
@@ -73,14 +73,14 @@ class MainWindow(QWidget):
         self.panel.hide()
 
         # ---- bar ----
-        self.mic_btn = QToolButton(text="●", checkable=True, checked=True)
+        self.mic_btn = QToolButton(text="●", checkable=True, checked=True, objectName="barButton")
         self.mic_btn.setToolTip("Microphone on/off")
         self.mic_btn.toggled.connect(self._on_mic_toggled)
 
-        self.scanner = Scanner()
+        self.scanner = LightLine()
         self.scanner.setToolTip("kai — click to show the conversation")
 
-        self.menu_btn = QToolButton(text="⋯")
+        self.menu_btn = QToolButton(text="⋯", objectName="barButton")
         self.menu_btn.setPopupMode(QToolButton.InstantPopup)
         menu = QMenu(self)
         menu.addAction("Settings…", self.settings_requested.emit)
@@ -91,8 +91,8 @@ class MainWindow(QWidget):
         self.menu_btn.setMenu(menu)
 
         bar = QHBoxLayout()
-        bar.setContentsMargins(12, 0, 8, 0)
-        bar.setSpacing(10)
+        bar.setContentsMargins(10, 0, 6, 0)
+        bar.setSpacing(6)
         bar.addWidget(self.mic_btn)
         bar.addWidget(self.scanner, 1)
         bar.addWidget(self.menu_btn)
@@ -144,9 +144,10 @@ class MainWindow(QWidget):
         path = QPainterPath()
         path.addRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), radius, radius)
         bg = QColor(BG)
-        bg.setAlphaF(0.96)
+        bg.setAlphaF(0.88)
         p.fillPath(path, bg)
-        p.setPen(QColor(BORDER))
+        edge = QColor(255, 255, 255, 18)
+        p.setPen(edge)
         p.drawPath(path)
 
     # ---- updates from the agent ----

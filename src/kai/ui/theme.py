@@ -16,14 +16,14 @@ STATE_COLORS = {
     "speaking": ACCENT,
 }
 
-# state -> (lit color, unlit color) for the scanner LEDs
-SCANNER_COLORS = {
-    "offline": ("#5a5a62", "#1c1c20"),
-    "connecting": ("#ff2d2d", "#2a1010"),
-    "listening": ("#ff2d2d", "#2a1010"),
-    "thinking": ("#ffb02e", "#2a1f0c"),
-    "speaking": ("#ff2d2d", "#2a1010"),
-    "muted": ("#8a8a94", "#1c1c20"),
+# state -> (glow color, highlight color) for the light line
+LINE_COLORS = {
+    "offline": ("#5a5a64", "#8a8a94"),
+    "connecting": ("#ff5a5f", "#ff8a80"),
+    "listening": ("#ff5a5f", "#ffd1cc"),
+    "thinking": ("#8b5cf6", "#d8c8ff"),
+    "speaking": ("#ff5a5f", "#ffb347"),
+    "muted": ("#6a6a74", "#a0a0aa"),
 }
 
 STYLESHEET = f"""
@@ -111,6 +111,8 @@ QToolButton {{
 }}
 QToolButton:hover {{ background: {SURFACE}; color: {TEXT}; }}
 QToolButton:checked {{ color: {TEXT}; }}
+QToolButton#barButton {{ font-size: 11px; padding: 4px 6px; color: {MUTED}; }}
+QToolButton#barButton:hover {{ color: {TEXT}; background: transparent; }}
 QToolButton::menu-indicator {{ image: none; }}
 QPlainTextEdit {{
     background: {SURFACE};

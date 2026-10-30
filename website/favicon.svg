@@ -1,8 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect x="0" y="18" width="64" height="28" rx="14" fill="#0d0d0f"/>
-  <rect x="8" y="27" width="8" height="10" rx="2" fill="#ff2d2d" fill-opacity="0.25"/>
-  <rect x="18.5" y="27" width="8" height="10" rx="2" fill="#ff2d2d" fill-opacity="0.6"/>
-  <rect x="29" y="27" width="8" height="10" rx="2" fill="#ff2d2d"/>
-  <rect x="39.5" y="27" width="8" height="10" rx="2" fill="#ff2d2d" fill-opacity="0.6"/>
-  <rect x="50" y="27" width="8" height="10" rx="2" fill="#ff2d2d" fill-opacity="0.25"/>
+  <defs>
+    <linearGradient id="g" x1="0" x2="1">
+      <stop offset="0" stop-color="#ff5a5f" stop-opacity="0"/>
+      <stop offset="0.5" stop-color="#ffd1cc"/>
+      <stop offset="1" stop-color="#ff5a5f" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="16" width="64" height="32" rx="16" fill="#0d0d0f"/>
+  <rect x="10" y="28" width="44" height="8" rx="4" fill="url(#g)" opacity="0.35"/>
+  <rect x="10" y="30.5" width="44" height="3" rx="1.5" fill="url(#g)"/>
 </svg>

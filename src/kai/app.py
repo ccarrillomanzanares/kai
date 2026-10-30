@@ -15,7 +15,7 @@ from kai.ui.diag_dialog import DiagDialog
 from kai.ui.main_window import MainWindow
 from kai.ui.onboarding import OnboardingDialog
 from kai.ui.theme import STYLESHEET
-from kai.ui.tray import Tray, scanner_icon
+from kai.ui.tray import Tray, app_icon
 from kai.ui.settings_dialog import SettingsDialog
 
 
@@ -129,7 +129,7 @@ def main() -> int:
     app.setApplicationName("kai")
     app.setApplicationVersion(__version__)
     app.setStyleSheet(STYLESHEET)
-    app.setWindowIcon(scanner_icon())
+    app.setWindowIcon(app_icon())
     app.setQuitOnLastWindowClosed(False)  # dialogs closing must not quit; use "Quit kai"
 
     window = MainWindow()

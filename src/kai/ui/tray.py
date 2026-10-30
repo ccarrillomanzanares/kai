@@ -2,38 +2,39 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
+from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtGui import QColor, QIcon, QLinearGradient, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 
 from kai.ui.main_window import MainWindow
 
 
-def scanner_icon(size: int = 64) -> QIcon:
-    """Five LEDs, the middle one lit: a tiny version of the scanner."""
+def app_icon(size: int = 64) -> QIcon:
+    """A dark capsule with a glowing line: a tiny version of the light line."""
     pixmap = QPixmap(size, size)
     pixmap.fill(Qt.transparent)
     p = QPainter(pixmap)
     p.setRenderHint(QPainter.Antialiasing)
     p.setPen(Qt.NoPen)
     p.setBrush(QColor("#0d0d0f"))
-    p.drawRoundedRect(QRectF(0, size * 0.28, size, size * 0.44), size * 0.22, size * 0.22)
-    alphas = [0.25, 0.6, 1.0, 0.6, 0.25]
-    w, gap = size * 0.13, size * 0.04
-    x = (size - (5 * w + 4 * gap)) / 2
-    for a in alphas:
-        c = QColor("#ff2d2d")
-        c.setAlphaF(a)
-        p.setBrush(c)
-        p.drawRoundedRect(QRectF(x, size * 0.42, w, size * 0.16), 2, 2)
-        x += w + gap
+    p.drawRoundedRect(QRectF(0, size * 0.25, size, size * 0.5), size * 0.25, size * 0.25)
+    grad = QLinearGradient(size * 0.12, 0, size * 0.88, 0)
+    grad.setColorAt(0.0, QColor(255, 90, 95, 0))
+    grad.setColorAt(0.5, QColor("#ffd1cc"))
+    grad.setColorAt(1.0, QColor(255, 90, 95, 0))
+    for width, alpha in ((size * 0.18, 0.25), (size * 0.09, 1.0)):
+        pen = QPen(grad, width)
+        pen.setCapStyle(Qt.RoundCap)
+        p.setOpacity(alpha)
+        p.setPen(pen)
+        p.drawLine(QPointF(size * 0.16, size / 2), QPointF(size * 0.84, size / 2))
     p.end()
     return QIcon(pixmap)
 
 
 class Tray(QSystemTrayIcon):
     def __init__(self, window: MainWindow):
-        super().__init__(scanner_icon(), window)
+        super().__init__(app_icon(), window)
         self._window = window
         self.setToolTip("kai")
         menu = QMenu()
