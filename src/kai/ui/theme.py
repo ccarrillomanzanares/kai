@@ -37,6 +37,21 @@ QLineEdit {{
     selection-background-color: {ACCENT};
 }}
 QLineEdit:focus {{ border-color: {MUTED}; }}
+QComboBox {{
+    background: {SURFACE};
+    border: 1px solid {BORDER};
+    border-radius: 10px;
+    padding: 8px 12px;
+}}
+QComboBox:hover, QComboBox:focus {{ border-color: {MUTED}; }}
+QComboBox::drop-down {{ border: none; width: 24px; }}
+QComboBox QAbstractItemView {{
+    background: {SURFACE};
+    border: 1px solid {BORDER};
+    selection-background-color: {BORDER};
+    outline: none;
+    padding: 4px;
+}}
 QPushButton {{
     background: {SURFACE};
     border: 1px solid {BORDER};

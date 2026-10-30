@@ -8,12 +8,13 @@ import sys
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication, QDialog
 
-from kai import __version__, config, diag, logs
+from kai import __version__, config, diag, logs, voices
 from kai.ui.confirm_dialog import ConfirmDialog
 from kai.ui.diag_dialog import DiagDialog
 from kai.ui.main_window import MainWindow
 from kai.ui.onboarding import OnboardingDialog
 from kai.ui.theme import STYLESHEET
+from kai.ui.voice_dialog import VoiceDialog
 
 
 class Controller:
@@ -24,6 +25,7 @@ class Controller:
         window.mic_toggled.connect(self._toggle_mic)
         window.change_key_requested.connect(self.change_key)
         window.diagnostics_requested.connect(self.open_diagnostics)
+        window.voice_requested.connect(self.open_voice_settings)
 
     def start_agent(self) -> None:
         from kai.live import LiveAgent
@@ -32,7 +34,13 @@ class Controller:
         if not key:
             return
         self.stop_agent()
-        self.agent = a = LiveAgent(key)
+        settings = config.load_settings()
+        self.agent = a = LiveAgent(
+            key,
+            voice=settings["voice"],
+            accent_instruction=voices.accent_instruction(settings["accent"],
+                                                         settings["custom_accent"]),
+        )
         a.state_changed.connect(self.window.set_state)
         a.level.connect(self.window.set_level)
         a.user_said.connect(lambda t: self.window.append("you", t))
@@ -55,6 +63,10 @@ class Controller:
             self.start_agent()
             return True
         return False
+
+    def open_voice_settings(self) -> None:
+        if VoiceDialog(self.window).exec() == QDialog.Accepted and self.agent:
+            self.start_agent()  # voice and accent are fixed per session
 
     def open_diagnostics(self) -> None:
         DiagDialog(self.window).exec()

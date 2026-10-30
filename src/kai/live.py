@@ -42,7 +42,9 @@ About the kai app itself, so you can help the user with it:
   a text field. The user can talk or type.
 - The ● button next to the text field mutes or unmutes the microphone.
 - Without headphones kai does not listen while it speaks; with headphones works best.
-- The ⋯ menu (top right) has "Change API key…", "Send diagnostics…" and "Quit".
+- The ⋯ menu (top right) has "Voice & accent…", "Change API key…", "Send diagnostics…"
+  and "Quit". In "Voice & accent…" the user picks one of 30 voices and an accent
+  (e.g. Spanish from Spain, Mexico or Argentina); kai restarts the conversation to apply it.
   The window can be moved by dragging it.
 - kai uses Google's Gemini 3.8 Live with the user's own free API key from Google AI Studio,
   stored in the system keychain. On the free tier Google may use conversations to improve
@@ -78,9 +80,12 @@ class LiveAgent(QObject):
     ui_action = Signal(str)  # a tool asked the app to do something in the UI
     confirm_requested = Signal(int, str, str)  # (request id, title, detail)
 
-    def __init__(self, api_key: str, full_duplex: bool = False):
+    def __init__(self, api_key: str, full_duplex: bool = False, voice: str | None = None,
+                 accent_instruction: str = ""):
         super().__init__()
         self._api_key = api_key
+        self._voice = voice
+        self._system_prompt = SYSTEM_PROMPT + (f"\n{accent_instruction}\n" if accent_instruction else "")
         self._full_duplex = full_duplex  # True when the user wears headphones
         self._mic_enabled = True
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -191,7 +196,12 @@ class LiveAgent(QObject):
     def _config(self, handle: str | None) -> types.LiveConnectConfig:
         return types.LiveConnectConfig(
             response_modalities=[types.Modality.AUDIO],
-            system_instruction=SYSTEM_PROMPT,
+            system_instruction=self._system_prompt,
+            speech_config=types.SpeechConfig(
+                voice_config=types.VoiceConfig(
+                    prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=self._voice)
+                )
+            ) if self._voice else None,
             # Google Search grounding is not included in the free tier.
             tools=tools.declarations(),
             input_audio_transcription=types.AudioTranscriptionConfig(),

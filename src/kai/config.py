@@ -7,6 +7,7 @@ it falls back to a user-only readable file in the config directory.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import stat
@@ -100,3 +101,25 @@ def validate_api_key(key: str) -> str | None:
     except Exception as e:  # network errors, etc.
         return f"Could not reach Google: {e}"
     return None
+
+
+# ---- settings ----
+
+DEFAULT_SETTINGS = {"voice": None, "accent": "auto", "custom_accent": ""}
+
+
+def _settings_file() -> Path:
+    return config_dir() / "settings.json"
+
+
+def load_settings() -> dict:
+    settings = dict(DEFAULT_SETTINGS)
+    try:
+        settings.update(json.loads(_settings_file().read_text(encoding="utf-8")))
+    except (OSError, ValueError):
+        pass
+    return settings
+
+
+def save_settings(settings: dict) -> None:
+    _settings_file().write_text(json.dumps(settings, indent=2), encoding="utf-8")
