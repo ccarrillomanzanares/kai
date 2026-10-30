@@ -1,0 +1,30 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "kai"
+version = "0.1.0"
+description = "A minimalist voice AI agent that helps you manage your computer, powered by Gemini Live."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "google-genai>=2.30",
+    "PySide6>=6.8",
+    "sounddevice>=0.5",
+    "numpy>=2.0",
+    "keyring>=25",
+    "psutil>=6",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+kai = "kai.app:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/kai"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
