@@ -31,6 +31,8 @@ class Tool:
     parameters: dict[str, Any]
     func: Callable[..., Any]
     risk: Risk
+    # UI tools only describe what happened; the app performs the action on the UI thread.
+    ui_action: bool = False
 
     def declaration(self) -> types.FunctionDeclaration:
         return types.FunctionDeclaration(
@@ -68,12 +70,28 @@ TOOLS: dict[str, Tool] = {
             system.open_url,
             Risk.SAFE,
         ),
+        Tool(
+            "open_diagnostics",
+            "Open kai's 'Send diagnostics' window so the user can review and send a report "
+            "with kai's logs and system info (no conversations, no API key). Use it when the "
+            "user reports a problem with kai or asks to send diagnostics. Nothing is sent "
+            "until the user clicks Send.",
+            _NO_PARAMS,
+            lambda: "The diagnostics window is open. The user must click Send to upload it.",
+            Risk.SAFE,
+            ui_action=True,
+        ),
     ]
 }
 
 
 def declarations() -> list[types.Tool]:
     return [types.Tool(function_declarations=[t.declaration() for t in TOOLS.values()])]
+
+
+def is_ui_action(name: str) -> bool:
+    tool = TOOLS.get(name)
+    return tool is not None and tool.ui_action
 
 
 def call(name: str, args: dict[str, Any] | None) -> dict[str, Any]:

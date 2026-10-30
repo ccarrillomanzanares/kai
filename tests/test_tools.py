@@ -33,3 +33,9 @@ def test_get_system_info():
 )
 def test_looks_like_api_key(key, ok):
     assert config.looks_like_api_key(key) is ok
+
+
+def test_open_diagnostics_is_a_ui_action():
+    assert tools.is_ui_action("open_diagnostics")
+    assert not tools.is_ui_action("open_url")
+    assert "Send" in tools.call("open_diagnostics", {})["result"]

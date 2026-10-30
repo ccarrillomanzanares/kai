@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import sys
 
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication, QDialog
 
 from kai import __version__, config, diag, logs
@@ -21,7 +22,7 @@ class Controller:
         window.text_submitted.connect(self._send_text)
         window.mic_toggled.connect(self._toggle_mic)
         window.change_key_requested.connect(self.change_key)
-        window.diagnostics_requested.connect(lambda: DiagDialog(window).exec())
+        window.diagnostics_requested.connect(self.open_diagnostics)
 
     def start_agent(self) -> None:
         from kai.live import LiveAgent
@@ -37,6 +38,7 @@ class Controller:
         a.kai_said.connect(lambda t: self.window.append("kai", t))
         a.error.connect(self.window.show_notice)
         a.fatal_error.connect(self._on_fatal)
+        a.ui_action.connect(self._on_ui_action)
         a.set_mic_enabled(self.window.mic_btn.isChecked())
         a.start()
 
@@ -51,6 +53,14 @@ class Controller:
             self.start_agent()
             return True
         return False
+
+    def open_diagnostics(self) -> None:
+        DiagDialog(self.window).exec()
+
+    def _on_ui_action(self, name: str) -> None:
+        if name == "open_diagnostics":
+            # Defer so the tool response goes out before the modal dialog opens.
+            QTimer.singleShot(0, self.open_diagnostics)
 
     def _on_fatal(self, message: str) -> None:
         self.stop_agent()

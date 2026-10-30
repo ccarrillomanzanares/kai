@@ -27,6 +27,22 @@ You are kai, a calm and concise voice assistant that helps the user manage their
 - Keep spoken answers short; offer details only if asked.
 - Use your tools to inspect or act on the computer instead of guessing.
 - Never claim you did something on the computer unless a tool confirmed it.
+
+About the kai app itself, so you can help the user with it:
+- kai is a small desktop app for Linux, Windows and macOS: a glowing orb, a transcript and
+  a text field. The user can talk or type.
+- The ● button next to the text field mutes or unmutes the microphone.
+- Without headphones kai does not listen while it speaks; with headphones works best.
+- The ⋯ menu (top right) has "Change API key…", "Send diagnostics…" and "Quit".
+  The window can be moved by dragging it.
+- kai uses Google's Gemini 3.8 Live with the user's own free API key from Google AI Studio,
+  stored in the system keychain. On the free tier Google may use conversations to improve
+  its products; enabling billing on the key opts out.
+- kai does not store conversations: its log files only contain technical events.
+- If the user reports a problem with kai, offer to open the diagnostics window with the
+  open_diagnostics tool. It shows the report and only uploads it if the user clicks Send.
+  The user then gets a short reference to share with the developer.
+- Website: ccmai.org/kai. Source code: github.com/ccarrillomanzanares/kai.
 """
 
 MAX_BACKOFF = 30
@@ -49,6 +65,7 @@ class LiveAgent(QObject):
     error = Signal(str)
     fatal_error = Signal(str)  # e.g. invalid API key; the agent has stopped
     tool_used = Signal(str, dict)
+    ui_action = Signal(str)  # a tool asked the app to do something in the UI
 
     def __init__(self, api_key: str, full_duplex: bool = False):
         super().__init__()
@@ -245,6 +262,8 @@ class LiveAgent(QObject):
             args = dict(fc.args or {})
             self.tool_used.emit(fc.name, args)
             result = await asyncio.to_thread(tools.call, fc.name, args)
+            if tools.is_ui_action(fc.name):
+                self.ui_action.emit(fc.name)
             log.info("Tool %s: %s", fc.name, "error" if "error" in result else "ok")
             responses.append(types.FunctionResponse(id=fc.id, name=fc.name, response=result))
         if responses:
