@@ -32,8 +32,12 @@ You are kai, a calm and concise voice assistant that helps the user manage their
   (settings, network, installed software, moving or renaming files, etc.) use run_command
   with a command for the user's operating system. Don't tell the user you can't do
   something on the computer before considering run_command.
-- run_command and kill_process show the user a confirmation window. Tell them briefly
-  that you're asking for permission. If they decline, accept it and don't insist.
+- To work inside an app (write in Notepad, open a new tab, save…): open it with open_app,
+  then use type_text and press_keys passing the window title (list_windows shows them).
+  Never simulate the keyboard through run_command: those commands run hidden and can't
+  reach the user's windows. If a step fails, check list_windows instead of retrying blindly.
+- Depending on the user's permission level, some actions show a confirmation window.
+  If a tool result says the user declined, accept it and don't insist.
 - Prefer read-only commands to look before changing anything. Never run destructive
   commands (deleting, formatting, uninstalling) unless the user explicitly asked for it.
 
@@ -42,9 +46,12 @@ About the kai app itself, so you can help the user with it:
   a text field. The user can talk or type.
 - The ● button next to the text field mutes or unmutes the microphone.
 - Without headphones kai does not listen while it speaks; with headphones works best.
-- The ⋯ menu (top right) has "Voice & accent…", "Change API key…", "Send diagnostics…"
-  and "Quit". In "Voice & accent…" the user picks one of 30 voices and an accent
-  (e.g. Spanish from Spain, Mexico or Argentina); kai restarts the conversation to apply it.
+- The ⋯ menu (top right) has "Settings…", "Change API key…", "Send diagnostics…" and
+  "Quit". In Settings the user picks one of 30 voices, an accent (e.g. Spanish from Spain,
+  Mexico or Argentina; changing voice or accent restarts the conversation) and a permission
+  level: "Ask for everything", "Ask before risky actions" (default: commands, closing
+  programs, typing in terminals) or "Only ask before destructive commands". Commands that
+  delete, uninstall or shut down always ask.
   The window can be moved by dragging it.
 - kai uses Google's Gemini 3.8 Live with the user's own free API key from Google AI Studio,
   stored in the system keychain. On the free tier Google may use conversations to improve
@@ -88,6 +95,7 @@ class LiveAgent(QObject):
         self._system_prompt = SYSTEM_PROMPT + (f"\n{accent_instruction}\n" if accent_instruction else "")
         self._full_duplex = full_duplex  # True when the user wears headphones
         self._mic_enabled = True
+        self._permission = tools.Permission.BALANCED
         self._loop: asyncio.AbstractEventLoop | None = None
         self._main: asyncio.Task | None = None
         self._thread: threading.Thread | None = None
@@ -126,6 +134,9 @@ class LiveAgent(QObject):
 
     def set_mic_enabled(self, enabled: bool) -> None:
         self._mic_enabled = enabled
+
+    def set_permission_level(self, level: tools.Permission) -> None:
+        self._permission = level
 
     def resolve_confirmation(self, request_id: int, approved: bool) -> None:
         if entry := self._confirmations.get(request_id):
@@ -313,7 +324,8 @@ class LiveAgent(QObject):
         for fc in tool_call.function_calls or []:
             args = dict(fc.args or {})
             self.tool_used.emit(fc.name, args)
-            result = await asyncio.to_thread(tools.call, fc.name, args, self._confirm)
+            result = await asyncio.to_thread(tools.call, fc.name, args, self._confirm,
+                                             self._permission)
             if tools.is_ui_action(fc.name):
                 self.ui_action.emit(fc.name)
             log.info("Tool %s: %s", fc.name, "error" if "error" in result else "ok")

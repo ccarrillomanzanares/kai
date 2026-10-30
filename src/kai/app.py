@@ -9,12 +9,13 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication, QDialog
 
 from kai import __version__, config, diag, logs, voices
+from kai.tools import Permission
 from kai.ui.confirm_dialog import ConfirmDialog
 from kai.ui.diag_dialog import DiagDialog
 from kai.ui.main_window import MainWindow
 from kai.ui.onboarding import OnboardingDialog
 from kai.ui.theme import STYLESHEET
-from kai.ui.voice_dialog import VoiceDialog
+from kai.ui.settings_dialog import SettingsDialog
 
 
 class Controller:
@@ -25,7 +26,7 @@ class Controller:
         window.mic_toggled.connect(self._toggle_mic)
         window.change_key_requested.connect(self.change_key)
         window.diagnostics_requested.connect(self.open_diagnostics)
-        window.voice_requested.connect(self.open_voice_settings)
+        window.settings_requested.connect(self.open_settings)
 
     def start_agent(self) -> None:
         from kai.live import LiveAgent
@@ -50,6 +51,7 @@ class Controller:
         a.ui_action.connect(self._on_ui_action)
         a.confirm_requested.connect(lambda rid, title, detail: self._on_confirm_requested(a, rid, title, detail))
         a.set_mic_enabled(self.window.mic_btn.isChecked())
+        a.set_permission_level(Permission(settings["permissions"]))
         a.start()
 
     def stop_agent(self) -> None:
@@ -64,16 +66,20 @@ class Controller:
             return True
         return False
 
-    def open_voice_settings(self) -> None:
-        if VoiceDialog(self.window).exec() == QDialog.Accepted and self.agent:
+    def open_settings(self) -> None:
+        before = config.load_settings()
+        dialog = SettingsDialog(self.window)
+        if dialog.exec() != QDialog.Accepted or not self.agent:
+            return
+        if dialog.voice_changed(before):
             self.start_agent()  # voice and accent are fixed per session
+        else:
+            self.agent.set_permission_level(Permission(config.load_settings()["permissions"]))
 
     def open_diagnostics(self) -> None:
         DiagDialog(self.window).exec()
 
     def _on_confirm_requested(self, agent, request_id: int, title: str, detail: str) -> None:
-        self.window.raise_()
-        self.window.activateWindow()
         approved = ConfirmDialog(title, detail, self.window).exec() == QDialog.Accepted
         agent.resolve_confirmation(request_id, approved)
 

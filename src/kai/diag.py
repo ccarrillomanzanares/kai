@@ -20,7 +20,7 @@ from kai import __version__, config, logs
 
 DIAG_URL = "https://ccmai.org/kai-diag/upload"
 MAX_LOG_BYTES = 400_000
-PACKAGES = ["google-genai", "PySide6", "sounddevice", "numpy", "keyring", "psutil"]
+PACKAGES = ["google-genai", "PySide6", "sounddevice", "numpy", "keyring", "psutil", "pynput", "PyWinCtl"]
 
 
 def _packages() -> dict[str, str]:

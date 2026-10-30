@@ -78,6 +78,14 @@ QToolButton {{
 QToolButton:hover {{ background: {SURFACE}; color: {TEXT}; }}
 QToolButton:checked {{ color: {TEXT}; }}
 QToolButton::menu-indicator {{ image: none; }}
+QPlainTextEdit {{
+    background: {SURFACE};
+    border: 1px solid {BORDER};
+    border-radius: 10px;
+    padding: 8px;
+    color: {TEXT};
+    selection-background-color: {BORDER};
+}}
 QTextBrowser {{
     background: transparent;
     border: none;

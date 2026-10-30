@@ -107,3 +107,41 @@ def test_open_windows_app_uses_start_menu_app_id(monkeypatch):
     assert launched == [["explorer.exe", "shell:AppsFolder\\5319275A.WhatsAppDesktop_cv1g1gvanyjgm!App"]]
     with pytest.raises(FileNotFoundError, match="Similar apps: Calculadora"):
         apps._open_windows_app("calculadoro pro max")
+
+
+@pytest.mark.parametrize(
+    "command, destructive",
+    [
+        ("Get-Process | Sort-Object CPU -Descending | Format-Table", False),
+        ("python3 --version", False),
+        ("dir 2>&1", False),
+        ("rm -rf kai-diag", True),
+        ("Remove-Item -Recurse C:\\temp", True),
+        ("format D: /q", True),
+        ("shutdown /s /t 0", True),
+        ("echo hi > notes.txt", True),
+        ("winget uninstall Spotify", True),
+    ],
+)
+def test_is_destructive(command, destructive):
+    assert tools.is_destructive(command) is destructive
+
+
+def test_permission_levels():
+    P, T = tools.Permission, tools.TOOLS
+    need = tools.needs_confirmation
+    cmd = {"command": "python3 --version"}
+    rm = {"command": "rm -rf ~/x"}
+    note = {"text": "hola", "window": "Bloc de notas"}
+    term = {"text": "ls", "window": "Windows PowerShell"}
+
+    assert not any(need(T["get_system_info"], {}, lvl) for lvl in P)
+    # strict: everything that isn't read-only
+    assert need(T["open_app"], {"name": "x"}, P.STRICT) and need(T["type_text"], note, P.STRICT)
+    # balanced: commands and terminals, not typing in normal apps
+    assert need(T["run_command"], cmd, P.BALANCED)
+    assert not need(T["type_text"], note, P.BALANCED) and need(T["type_text"], term, P.BALANCED)
+    assert not need(T["open_app"], {"name": "x"}, P.BALANCED)
+    # trusted: only destructive commands
+    assert not need(T["run_command"], cmd, P.TRUSTED) and need(T["run_command"], rm, P.TRUSTED)
+    assert not need(T["kill_process"], {"pid": 1}, P.TRUSTED)

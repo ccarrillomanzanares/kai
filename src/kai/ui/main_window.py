@@ -33,7 +33,7 @@ class MainWindow(QWidget):
     mic_toggled = Signal(bool)
     change_key_requested = Signal()
     diagnostics_requested = Signal()
-    voice_requested = Signal()
+    settings_requested = Signal()
 
     def __init__(self):
         super().__init__(objectName="root")
@@ -46,7 +46,7 @@ class MainWindow(QWidget):
         self.menu_btn = QToolButton(text="⋯")
         self.menu_btn.setPopupMode(QToolButton.InstantPopup)
         menu = QMenu(self)
-        menu.addAction("Voice & accent…", self.voice_requested.emit)
+        menu.addAction("Settings…", self.settings_requested.emit)
         menu.addAction("Change API key…", self.change_key_requested.emit)
         menu.addAction("Send diagnostics…", self.diagnostics_requested.emit)
         menu.addSeparator()
