@@ -6,7 +6,7 @@ import argparse
 import sys
 
 from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QApplication, QDialog
+from PySide6.QtWidgets import QApplication, QDialog, QSystemTrayIcon
 
 from kai import __version__, config, diag, logs, voices
 from kai.tools import Permission
@@ -15,6 +15,7 @@ from kai.ui.diag_dialog import DiagDialog
 from kai.ui.main_window import MainWindow
 from kai.ui.onboarding import OnboardingDialog
 from kai.ui.theme import STYLESHEET
+from kai.ui.tray import Tray, scanner_icon
 from kai.ui.settings_dialog import SettingsDialog
 
 
@@ -128,10 +129,16 @@ def main() -> int:
     app.setApplicationName("kai")
     app.setApplicationVersion(__version__)
     app.setStyleSheet(STYLESHEET)
+    app.setWindowIcon(scanner_icon())
+    app.setQuitOnLastWindowClosed(False)  # dialogs closing must not quit; use "Quit kai"
 
     window = MainWindow()
     controller = Controller(window)
+    window.quit_requested.connect(app.quit)
     app.aboutToQuit.connect(controller.stop_agent)
+    if QSystemTrayIcon.isSystemTrayAvailable():
+        tray = Tray(window)
+        tray.show()
     window.show()
 
     if config.get_api_key():

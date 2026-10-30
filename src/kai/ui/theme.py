@@ -16,6 +16,16 @@ STATE_COLORS = {
     "speaking": ACCENT,
 }
 
+# state -> (lit color, unlit color) for the scanner LEDs
+SCANNER_COLORS = {
+    "offline": ("#5a5a62", "#1c1c20"),
+    "connecting": ("#ff2d2d", "#2a1010"),
+    "listening": ("#ff2d2d", "#2a1010"),
+    "thinking": ("#ffb02e", "#2a1f0c"),
+    "speaking": ("#ff2d2d", "#2a1010"),
+    "muted": ("#8a8a94", "#1c1c20"),
+}
+
 STYLESHEET = f"""
 * {{
     font-family: "Inter", "Segoe UI", "SF Pro Text", "Helvetica Neue", sans-serif;

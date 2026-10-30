@@ -41,7 +41,7 @@ src/kai/
   logs.py         log file setup and secret redaction
   diag.py         diagnostics report (no conversations, no keys)
   tools/          functions the model can call on the computer
-  ui/             Qt window, orb, onboarding dialog, theme
+  ui/             scanner bar, tray icon, dialogs, theme
 website/          static site, deployed to ccmai.org/kai
 server/           diagnostics receiver that runs on the VPS
 scripts/          maintenance scripts (deploy-web.sh)
