@@ -88,6 +88,7 @@ def test_buttons_are_pressed_without_the_mouse(monkeypatch):
             return type("P", (), {"Invoke": lambda s: pressed.append(True)})()
 
     monkeypatch.setattr(uia.sys, "platform", "win32")
+    monkeypatch.setattr(uia, "_uia_init", lambda: None)
     monkeypatch.setattr(uia, "_uia_executor", None)
     monkeypatch.setattr(uia, "_last", {1: uia.Element("button", "Guardar", (0, 0, 10, 10),
                                                       handle=Handle())})
@@ -96,3 +97,34 @@ def test_buttons_are_pressed_without_the_mouse(monkeypatch):
     monkeypatch.setattr(screen, "click_point", lambda *a: pytest.fail("used the mouse"))
     assert uia.click_element(1).startswith("Pressed")
     assert pressed == [True]
+
+
+def test_a_press_that_opens_a_modal_is_not_repeated(monkeypatch):
+    import threading
+
+    release = threading.Event()
+
+    class Handle:
+        def GetInvokePattern(self):
+            return type("P", (), {"Invoke": lambda s: release.wait(5)})()
+
+    monkeypatch.setattr(uia.sys, "platform", "win32")
+    monkeypatch.setattr(uia, "_uia_init", lambda: None)
+    monkeypatch.setattr(uia, "_uia_executor", None)
+    monkeypatch.setattr(uia, "PRESS_WAIT", 0.2)
+    monkeypatch.setattr(uia, "_last", {1: uia.Element("button", "Descartar todo", (0, 0, 9, 9),
+                                                      handle=Handle())})
+    monkeypatch.setattr(uia, "_last_window", "Recuperación")
+    monkeypatch.setattr(uia.desktop, "focus_window", lambda t: "")
+    monkeypatch.setattr(screen, "click_point", lambda *a: pytest.fail("clicked again"))
+    try:
+        assert "waiting for an answer" in uia.click_element(1)
+        assert uia._uia_executor is None and uia._last == {}  # fresh thread for what's next
+    finally:
+        release.set()
+
+
+def test_fill_field_refuses_buttons(monkeypatch):
+    monkeypatch.setattr(uia, "_last", {15: uia.Element("button", "Añadir imágenes", (0, 0, 9, 9))})
+    with pytest.raises(ValueError, match="not a text field"):
+        uia.fill_field(15, "hola")

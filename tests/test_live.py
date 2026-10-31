@@ -63,3 +63,10 @@ def test_long_silent_tool_runs_are_nudged_then_stopped(monkeypatch):
     assert "note" in sent[live.LONG_RUN - 1].response
     assert "Stopped" in sent[-1].response["error"]
     agent._silent_tools = 0  # speaking resets the count
+
+
+def test_only_key_errors_are_fatal():
+    assert live._is_key_problem(1008, "API key not valid. Please pass a valid API key.")
+    assert live._is_key_problem(403, "")
+    assert not live._is_key_problem(1008, "Requested entity already exists")
+    assert not live._is_key_problem(1011, "Internal error")

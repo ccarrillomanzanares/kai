@@ -45,7 +45,11 @@ def look_at_screen(window: str | None = None) -> Image:
     from PIL import Image as PILImage
 
     global _last_region, _last_jpeg
-    with mss.mss() as sct:
+    try:
+        sct = mss.mss()
+    except Exception as e:
+        raise RuntimeError(f"Can't capture the screen: {e}") from e
+    with sct:
         if window:
             win = desktop._find_window(window)
             desktop.focus_window(win.title)
@@ -60,7 +64,13 @@ def look_at_screen(window: str | None = None) -> Image:
         else:
             region = dict(sct.monitors[1])  # the primary screen
             what = "the screen"
-        shot = sct.grab(region)
+        try:
+            shot = sct.grab(region)
+        except mss.exception.ScreenShotError as e:
+            raise RuntimeError(
+                "The screen can't be captured right now. On Windows this happens while a "
+                "security prompt (User Account Control) or the lock screen is showing: "
+                "ask the user to answer it themselves.") from e
     img = PILImage.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
     _last_region = (region["left"], region["top"], shot.size[0], shot.size[1])
     _last_jpeg = to_jpeg(img)
@@ -89,11 +99,15 @@ def click_point(px: int, py: int, button: str = "left", double: bool = False) ->
 
 
 def click(x: float, y: float, button: str = "left", double: bool = False) -> str:
+    from kai.tools import uia
+
     px, py = _to_screen(x, y)
+    hit = uia.describe_point(px, py)  # before clicking: the click may change the screen
     click_point(px, py, button, double)
     kind = ("Double-clicked" if double else "Right-clicked" if button == "right" else "Clicked")
-    return (f"{kind} at ({x:g}, {y:g}). This only says the click was sent: take a new "
-            "screenshot and check before telling the user it worked.")
+    landed = (f" It landed on: {hit}. If that's not what you meant, aim again." if hit else "")
+    return (f"{kind} at ({x:g}, {y:g}).{landed} This only says the click was sent: take a "
+            "new screenshot and check before telling the user it worked.")
 
 
 def scroll(direction: str = "down", amount: int = 5, x: float | None = None,

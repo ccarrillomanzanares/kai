@@ -108,7 +108,8 @@ def type_text(text: str, window: str | None = None) -> str:
 
     target = _ensure_target(window)
     Controller().type(text)
-    return f"Typed {len(text)} characters into {target}"
+    return (f"Typed {len(text)} characters into {target}. Check it arrived where you meant "
+            "before telling the user.")
 
 
 def _parse_keys(keys: str):
@@ -137,4 +138,4 @@ def press_keys(keys: str, window: str | None = None) -> str:
         kb.press(k)
     for k in reversed(combo):
         kb.release(k)
-    return f"Pressed {keys} in {target}"
+    return f"Pressed {keys} in {target}. Check the result before telling the user it worked."

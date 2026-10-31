@@ -17,6 +17,7 @@ from __future__ import annotations
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
 from dataclasses import dataclass, field
 
 from kai.tools import desktop
@@ -66,6 +67,26 @@ _WIN_ROLES = {
 }
 
 _uia_executor: ThreadPoolExecutor | None = None
+
+READ_TIMEOUT = 10  # seconds to read a window
+PRESS_WAIT = 2  # seconds; longer means the app opened a modal dialog and is waiting
+
+
+def _executor() -> ThreadPoolExecutor:
+    global _uia_executor
+    if _uia_executor is None:
+        _uia_executor = ThreadPoolExecutor(1, "kai-uia", initializer=_uia_init)
+    return _uia_executor
+
+
+def _abandon_thread() -> None:
+    """The UIA thread is stuck (e.g. an Invoke waiting for a modal dialog to close).
+    Leave it waiting and use a fresh one; its elements can't be used any more."""
+    global _uia_executor
+    if _uia_executor is not None:
+        _uia_executor.shutdown(wait=False, cancel_futures=True)
+    _uia_executor = None
+    _last.clear()
 
 
 def _uia_init() -> None:
@@ -193,11 +214,13 @@ def _linux_elements(title: str) -> tuple[str, list[Element]]:
 
 def _collect(window: str) -> tuple[str, list[Element]]:
     if sys.platform == "win32":
-        global _uia_executor
         win = desktop._find_window(window)
-        if _uia_executor is None:
-            _uia_executor = ThreadPoolExecutor(1, "kai-uia", initializer=_uia_init)
-        return win.title, _uia_executor.submit(_windows_elements, win).result(timeout=30)
+        try:
+            return win.title, _executor().submit(_windows_elements, win).result(READ_TIMEOUT)
+        except FutureTimeout:
+            _abandon_thread()
+            raise RuntimeError("Reading the window took too long: the app may be busy or "
+                               "showing a dialog. Try read_window again, or look_at_screen.")
     if sys.platform.startswith("linux"):
         try:
             _atspi()
@@ -239,28 +262,71 @@ def _get(number: int) -> Element:
     return element
 
 
-def _on_uia_thread(fn, *args):
-    if _uia_executor is None:
+def _on_uia_thread(fn, *args, timeout: float = 5):
+    if sys.platform != "win32":
         return fn(*args)
-    return _uia_executor.submit(fn, *args).result(timeout=15)
+    return _executor().submit(fn, *args).result(timeout)
 
 
-def _press(element: Element) -> bool:
-    """Press a button or link through accessibility: immune to popups covering it."""
+def _press(element: Element) -> str | None:
+    """Press a button or link through accessibility: immune to popups covering it.
+    Returns 'pressed', 'waiting' (it opened a modal dialog) or None (use the mouse)."""
     if element.handle is None or element.role not in ("button", "link"):
-        return False
+        return None
     try:
         if sys.platform == "win32":
             def invoke():
                 element.handle.GetInvokePattern().Invoke()
-            _on_uia_thread(invoke)
+            _on_uia_thread(invoke, timeout=PRESS_WAIT)
         else:
             Atspi = _atspi()
             if not Atspi.Action.do_action(element.handle, 0):
-                return False
-        return True
+                return None
+        return "pressed"
+    except FutureTimeout:
+        # Windows' Invoke only returns once a modal dialog it opened is closed. The press
+        # worked: don't click again, and read windows on a fresh thread meanwhile.
+        _abandon_thread()
+        return "waiting"
     except Exception:  # no such pattern/action: fall back to the mouse
-        return False
+        return None
+
+
+def _read_value(element: Element) -> str | None:
+    if element.handle is None:
+        return None
+    try:
+        if sys.platform == "win32":
+            return _on_uia_thread(lambda: element.handle.GetValuePattern().Value, timeout=2)
+        Atspi = _atspi()
+        count = Atspi.Text.get_character_count(element.handle)
+        return Atspi.Text.get_text(element.handle, 0, count)
+    except Exception:
+        return None
+
+
+def describe_point(px: int, py: int) -> str | None:
+    """What's under a screen point (Windows), to tell the model what a click hit."""
+    if sys.platform != "win32":
+        return None
+
+    def lookup():
+        import uiautomation as auto
+
+        ctrl = auto.ControlFromPoint(px, py)
+        if ctrl is None:
+            return None
+        role = _WIN_ROLES.get(ctrl.ControlTypeName) or ctrl.ControlTypeName.replace("Control", "")
+        top = ctrl.GetTopLevelControl()
+        where = f" in '{_clip(top.Name)}'" if top is not None and top.Name else ""
+        return f"{role} \"{_clip(ctrl.Name)}\"{where}" if ctrl.Name else f"{role}{where}"
+    try:
+        return _on_uia_thread(lookup, timeout=1.5)
+    except FutureTimeout:
+        _abandon_thread()
+        return None
+    except Exception:
+        return None
 
 
 def _set_value(element: Element, text: str) -> bool:
@@ -299,7 +365,11 @@ def click_element(number: int, double: bool = False, button: str = "left") -> st
 
     element = _get(number)
     _focus_window()
-    if not double and button == "left" and _press(element):
+    pressed = _press(element) if not double and button == "left" else None
+    if pressed == "waiting":
+        return (f"Pressed {element.describe()} in '{_last_window}'. It opened something that "
+                "is waiting for an answer, probably a dialog: list_windows and read it.")
+    if pressed:
         return f"Pressed {element.describe()} in '{_last_window}'. {CHECK_AFTER}"
     screen.click_point(*_center(element), button, double)
     return f"Clicked {element.describe()} in '{_last_window}'. {CHECK_AFTER}"
@@ -311,17 +381,21 @@ def fill_field(number: int, text: str) -> str:
     from kai.tools import screen
 
     element = _get(number)
+    if not element.role.endswith("field") and element.role not in ("dropdown", "document"):
+        raise ValueError(f"{element.describe()} is not a text field. Read the window again: "
+                         "numbers change when the app changes.")
     _focus_window()
-    if _set_value(element, text):
-        how = "Set"
-    else:
-        # Click into the field, select what's there and type over it. No window
-        # re-activation in between: that can move the focus out of the field.
-        screen.click_point(*_center(element))
-        kb = Controller()
-        with kb.pressed(Key.ctrl):
-            kb.press("a")
-            kb.release("a")
-        kb.type(text)
-        how = "Typed"
-    return f"{how} the text of {element.describe()} in '{_last_window}'. {CHECK_AFTER}"
+    # Type like a person: apps (e.g. web-based ones) only notice text that arrives as
+    # key presses. No window re-activation in between: it can move the focus away.
+    screen.click_point(*_center(element))
+    kb = Controller()
+    with kb.pressed(Key.ctrl):
+        kb.press("a")
+        kb.release("a")
+    kb.type(text)
+    time.sleep(0.2)
+    now = _read_value(element)
+    if now is not None and text.strip() not in now and _set_value(element, text):
+        now = _read_value(element)
+    shown = f" It now contains: {_clip(now)!r}." if now is not None else ""
+    return f"Typed into {element.describe()} in '{_last_window}'.{shown} {CHECK_AFTER}"

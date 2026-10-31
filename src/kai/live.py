@@ -26,6 +26,15 @@ from kai.config import MODEL
 
 log = logging.getLogger(__name__)
 
+def _is_key_problem(code: int | None, detail: str) -> bool:
+    """Only these errors mean the API key itself is wrong; others are worth a reconnect."""
+    text = detail.lower()
+    if code in (401, 403):
+        return True
+    return code in (1008, 400) and any(
+        w in text for w in ("api key", "api_key", "permission", "unauthenticated", "invalid key"))
+
+
 LONG_RUN = 8  # tool calls without speaking before kai is nudged to check in with the user
 MAX_SILENT_RUN = 16  # ...and before further tool calls are refused until it speaks
 
@@ -69,6 +78,9 @@ You are kai, a calm and concise voice assistant that helps the user manage their
   reach the user's windows.
 - Depending on the user's permission level, some actions show a confirmation window.
   If a tool result says the user declined, accept it and don't insist.
+- You only act when the user talks to you: you can't watch the screen or wait in the
+  background. If asked to keep an eye on something, say so and suggest they ask you to
+  check whenever they want.
 - Prefer read-only commands to look before changing anything. Never run destructive
   commands (deleting, formatting, uninstalling) unless the user explicitly asked for it.
 
@@ -391,13 +403,16 @@ class LiveAgent(QObject):
 
     async def _reconnect_loop(self, client: genai.Client) -> None:
         backoff = 1
+        stale_resumes = 0  # "already exists" errors in a row
         while not self._stopping:
             self._set_state(State.CONNECTING)
             resumed = False
+            connected_at = None
             try:
                 config = self._config(self._handle)
                 async with client.aio.live.connect(model=MODEL, config=config) as s:
                     self._session = s
+                    connected_at = time.monotonic()
                     self._last_server_msg = time.monotonic()
                     self._voiced_since_msg = 0
                     log.info("Connected to %s (resumed: %s)", MODEL, self._handle is not None)
@@ -412,9 +427,18 @@ class LiveAgent(QObject):
             except errors.APIError as e:
                 detail = e.message or str(e)
                 log.warning("Live API error %s: %s", e.code, detail)
-                if e.code in (1008, 400, 401, 403):
+                if _is_key_problem(e.code, detail):
                     self.fatal_error.emit(detail or "Google rejected the API key.")
                     return
+                if "already exists" in detail.lower():
+                    # Seen after long idle (e.g. a muted mic): resuming keeps the context, but
+                    # if the old session can't be resumed twice in a row, start a fresh one.
+                    lived = time.monotonic() - connected_at if connected_at else 0
+                    stale_resumes = stale_resumes + 1 if lived < 60 else 1
+                    if stale_resumes >= 2:
+                        log.info("Dropping the resumption handle after repeated errors")
+                        self._handle = None
+                        stale_resumes = 0
                 if e.code == 429 or "quota" in detail.lower():
                     self.error.emit("Free-tier quota reached. Retrying shortly…")
                     backoff = MAX_BACKOFF
