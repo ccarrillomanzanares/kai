@@ -71,3 +71,28 @@ def test_reading_tools_never_ask(monkeypatch):
     assert tools.needs_confirmation(tools.TOOLS["look_at_screen"], {}, tools.Permission.STRICT)
     assert not tools.needs_confirmation(tools.TOOLS["look_at_screen"], {},
                                         tools.Permission.BALANCED)
+
+
+def test_disabled_elements_are_not_clicked(monkeypatch):
+    monkeypatch.setattr(uia, "_last", {1: uia.Element("button", "Send", (0, 0, 10, 10),
+                                                      enabled=False)})
+    with pytest.raises(ValueError, match="disabled"):
+        uia.click_element(1)
+
+
+def test_buttons_are_pressed_without_the_mouse(monkeypatch):
+    pressed = []
+
+    class Handle:
+        def GetInvokePattern(self):
+            return type("P", (), {"Invoke": lambda s: pressed.append(True)})()
+
+    monkeypatch.setattr(uia.sys, "platform", "win32")
+    monkeypatch.setattr(uia, "_uia_executor", None)
+    monkeypatch.setattr(uia, "_last", {1: uia.Element("button", "Guardar", (0, 0, 10, 10),
+                                                      handle=Handle())})
+    monkeypatch.setattr(uia, "_last_window", "Guardar como")
+    monkeypatch.setattr(uia.desktop, "focus_window", lambda t: "")
+    monkeypatch.setattr(screen, "click_point", lambda *a: pytest.fail("used the mouse"))
+    assert uia.click_element(1).startswith("Pressed")
+    assert pressed == [True]

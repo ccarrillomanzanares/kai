@@ -74,8 +74,9 @@ class SettingsDialog(QDialog):
         self.detailed_logs.setChecked(self._settings["detailed_logs"])
 
         self.record = QCheckBox("Record conversations for diagnostics")
-        self.record.setToolTip("Saves what you and kai say, and kai's actions, on this "
-                               "computer. Sent only if you choose it when sending diagnostics.")
+        self.record.setToolTip("Saves what you and kai say, kai's actions and its last "
+                               "screenshots on this computer. Sent only if you choose it when "
+                               "sending diagnostics.")
         self.record.setChecked(self._settings["record_conversation"])
         self.record.toggled.connect(self._confirm_record)
 
@@ -122,8 +123,9 @@ class SettingsDialog(QDialog):
             return
         answer = QMessageBox.question(
             self, "Record conversations",
-            "kai will save what you and kai say, and every action it takes (including what it "
-            "types and the web addresses it opens), in a file on this computer.\n\n"
+            "kai will save what you and kai say, every action it takes (including what it "
+            "types and the web addresses it opens) and its last screenshots, on this "
+            "computer.\n\n"
             "It is only sent if you tick \"Include the recorded conversation\" when sending "
             "diagnostics. Turning this option off deletes the recording.\n\n"
             "Turn on recording?",

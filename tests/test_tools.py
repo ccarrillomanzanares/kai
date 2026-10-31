@@ -121,6 +121,9 @@ def test_open_windows_app_uses_start_menu_app_id(monkeypatch):
         ("shutdown /s /t 0", True),
         ("echo hi > notes.txt", True),
         ("winget uninstall Spotify", True),
+        ('Stop-Process -Name "msedge" -Force', True),
+        ("taskkill /IM soffice.exe /F", True),
+        ("Get-Process msedge", False),
     ],
 )
 def test_is_destructive(command, destructive):

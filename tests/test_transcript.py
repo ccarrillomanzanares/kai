@@ -38,3 +38,29 @@ def test_records_turns_and_tools(monkeypatch, tmp_path):
     assert transcript.path().exists()  # stopping keeps it, e.g. to send it later
     transcript.delete()
     assert not transcript.path().exists()
+
+
+def test_screenshots_are_kept_marked_and_capped(monkeypatch, tmp_path):
+    import io
+
+    from PIL import Image
+
+    _use_tmp(monkeypatch, tmp_path)
+    buf = io.BytesIO()
+    Image.new("RGB", (1280, 720), "white").save(buf, "JPEG")
+    transcript.set_enabled(True)
+    try:
+        for i in range(transcript.MAX_SHOTS + 3):
+            transcript.shot(buf.getvalue(), "click", (500, 500))
+        shots = transcript.read_shots()
+        assert len(shots) == transcript.MAX_SHOTS
+        img = Image.open(transcript.shots_dir() / sorted(shots)[-1]).convert("RGB")
+        assert max(img.size) == transcript.SHOT_SIDE
+        cx, cy = img.width // 2, img.height // 2
+        around = [img.getpixel((cx + dx, cy + dy)) for dx in range(-10, 11) for dy in range(-10, 11)]
+        assert any(r > 150 and g < 100 and b < 100 for r, g, b in around)  # the red click mark
+        assert "screenshots" in diag.collect(include_conversation=True)
+    finally:
+        transcript.set_enabled(False)
+        transcript.delete()
+    assert transcript.read_shots() == {}

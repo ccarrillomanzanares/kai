@@ -50,7 +50,8 @@ _DESTRUCTIVE = re.compile(
     r"shutdown|restart-computer|stop-computer|\breboot\b|\bpoweroff\b|\bhalt\b|"
     r"reg(\.exe)?\s+delete|remove-itemproperty|uninstall|\bapt(-get)?\s+(remove|purge)|"
     r"\bbrew\s+uninstall|\bwinget\s+uninstall|\bchmod\b|\bchown\b|takeown|icacls|"
-    r"\bmv\b|move-item|\bmove\b|>\s*[^&|]",
+    r"\bmv\b|move-item|\bmove\b|>\s*[^&|]|"
+    r"stop-process|\bspps\b|taskkill|\bpkill\b|\bkillall\b|\bkill\s+-9",
     re.IGNORECASE,
 )
 
@@ -185,9 +186,16 @@ TOOLS: dict[str, Tool] = {
                      x=("number", "Optional point to scroll over, 0-1000."),
                      y=("number", "Optional point to scroll over, 0-1000.")),
              screen.scroll, Risk.CONTROL),
+        Tool("fill_field",
+             "Put text into a field listed by read_window (replacing its content), by its "
+             "number. Prefer it to click_element + type_text.",
+             _params(["number", "text"], number=("integer", "Field number from read_window."),
+                     text=("string", "Text to put in the field.")),
+             uia.fill_field, Risk.CONTROL,
+             confirm_text=lambda number, text: (f"Type into {uia.describe(number)}", text[:600])),
         Tool("click_element",
-             "Click an element listed by read_window, by its number. To type into a field, "
-             "click it, then use type_text with the window title.",
+             "Click an element listed by read_window, by its number. Buttons and links are "
+             "pressed directly, so popups covering them don't matter.",
              _params(["number"], number=("integer", "Element number from read_window."),
                      double=("boolean", "True for a double-click."),
                      button=("string", "'left' (default) or 'right'.")),
@@ -250,7 +258,14 @@ TOOLS: dict[str, Tool] = {
                      reason=("string", "Short explanation for the user, in their language.")),
              shell.run_command, Risk.SENSITIVE,
              confirm_text=lambda command, reason="": (reason or "Run a command", command)),
-        Tool("kill_process", "Close a running program by its process id (see list_processes).",
+        Tool("close_window",
+             "Close an app window the normal way, like clicking its X (the app may ask to "
+             "save). Use this to close programs; kill_process only if this fails.",
+             _params(["title"], title=("string", "Window title or part of it.")),
+             desktop.close_window, Risk.SENSITIVE,
+             confirm_text=lambda title: ("Close a window", title)),
+        Tool("kill_process", "Force a program to quit by its process id (see list_processes). "
+             "Unsaved work is lost: only when close_window fails or the app hangs.",
              _params(["pid"], pid=("integer", "Process id.")),
              shell.kill_process, Risk.SENSITIVE,
              confirm_text=lambda pid: ("Close a program", shell.describe_kill(pid))),

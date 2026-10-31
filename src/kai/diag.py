@@ -108,6 +108,7 @@ def collect(include_conversation: bool = False) -> dict:
     report["conversation_status"] = _recording_status(included)  # sizes only, no content
     if included:
         report["conversation"] = transcript.read_tail()
+        report["screenshots"] = transcript.read_shots()
     return report
 
 

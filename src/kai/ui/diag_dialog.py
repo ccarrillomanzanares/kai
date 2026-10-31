@@ -26,6 +26,15 @@ INTRO = (
 )
 
 
+def _preview(report: dict) -> str:
+    """The report as JSON, with screenshots shown by name and size instead of base64."""
+    shown = dict(report)
+    if shown.get("screenshots"):
+        shown["screenshots"] = {name: f"<image, {len(data) * 3 // 4 // 1024} KB>"
+                                for name, data in shown["screenshots"].items()}
+    return json.dumps(shown, indent=2, ensure_ascii=False)
+
+
 class _Uploader(QThread):
     done = Signal(str, str)  # (report id, error)
 
@@ -52,7 +61,8 @@ class DiagDialog(QDialog):
         self._uploader: _Uploader | None = None
 
         self.include = QCheckBox("Include the recorded conversation")
-        self.include.setToolTip("What you and kai said, and kai's actions. "
+        self.include.setToolTip("What you and kai said, kai's actions and its last "
+                                "screenshots. "
                                 "Use \"Show report\" to read it before sending.")
         self.include.setChecked(has_conversation)
         self.include.toggled.connect(self._toggle_conversation)
@@ -60,8 +70,7 @@ class DiagDialog(QDialog):
         self.message = QLabel(INTRO, wordWrap=True)
         self.message.setTextInteractionFlags(Qt.TextSelectableByMouse)
 
-        self.details = QPlainTextEdit(json.dumps(self._report, indent=2, ensure_ascii=False),
-                                      readOnly=True)
+        self.details = QPlainTextEdit(_preview(self._report), readOnly=True)
         self.details.setMinimumHeight(260)
         self.details.hide()
 
@@ -91,7 +100,7 @@ class DiagDialog(QDialog):
 
     def _toggle_conversation(self, on: bool) -> None:
         self._report = diag.collect(include_conversation=on)
-        self.details.setPlainText(json.dumps(self._report, indent=2, ensure_ascii=False))
+        self.details.setPlainText(_preview(self._report))
 
     def _toggle_details(self) -> None:
         self.details.setVisible(not self.details.isVisible())

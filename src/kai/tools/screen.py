@@ -18,6 +18,11 @@ JPEG_QUALITY = 70
 
 # Screen region (left, top, width, height) of the last screenshot, in pixels.
 _last_region: tuple[int, int, int, int] | None = None
+_last_jpeg: bytes = b""  # the last screenshot, for the opt-in debug recording
+
+
+def last_jpeg() -> bytes:
+    return _last_jpeg
 
 
 @dataclass
@@ -39,7 +44,7 @@ def look_at_screen(window: str | None = None) -> Image:
     import mss
     from PIL import Image as PILImage
 
-    global _last_region
+    global _last_region, _last_jpeg
     with mss.mss() as sct:
         if window:
             win = desktop._find_window(window)
@@ -58,7 +63,8 @@ def look_at_screen(window: str | None = None) -> Image:
         shot = sct.grab(region)
     img = PILImage.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
     _last_region = (region["left"], region["top"], shot.size[0], shot.size[1])
-    return Image(to_jpeg(img),
+    _last_jpeg = to_jpeg(img)
+    return Image(_last_jpeg,
                  f"Screenshot of {what} attached. To click something in it, call click with "
                  "x and y from 0 to 1000 relative to this image (0,0 is its top-left corner).")
 
@@ -86,7 +92,8 @@ def click(x: float, y: float, button: str = "left", double: bool = False) -> str
     px, py = _to_screen(x, y)
     click_point(px, py, button, double)
     kind = ("Double-clicked" if double else "Right-clicked" if button == "right" else "Clicked")
-    return f"{kind} at ({x:g}, {y:g}). Take a new screenshot to check the result."
+    return (f"{kind} at ({x:g}, {y:g}). This only says the click was sent: take a new "
+            "screenshot and check before telling the user it worked.")
 
 
 def scroll(direction: str = "down", amount: int = 5, x: float | None = None,

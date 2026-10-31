@@ -19,6 +19,7 @@ from google.genai import errors, types
 from PySide6.QtCore import QObject, Signal
 
 from kai import tools, transcript
+from kai.tools import screen
 from kai import audio
 from kai.audio import IN_RATE, Microphone, Speaker
 from kai.config import MODEL
@@ -33,7 +34,10 @@ You are kai, a calm and concise voice assistant that helps the user manage their
 - Always answer in the language the user speaks to you.
 - Keep spoken answers short; offer details only if asked.
 - Use your tools to inspect or act on the computer instead of guessing.
-- Never claim you did something on the computer unless a tool confirmed it.
+- Never claim you did something on the computer unless you checked it. "Clicked", "Typed"
+  or "Pressed" only mean the input was sent: before saying a video plays, a file was saved
+  or a message was sent, read the page or window again, or look at the screen. If it
+  didn't work, say so plainly and try another way.
 - You can do much more than your specific tools: for anything they don't cover
   (settings, network, installed software, moving or renaming files, etc.) use run_command
   with a command for the user's operating system. Don't tell the user you can't do
@@ -47,11 +51,15 @@ You are kai, a calm and concise voice assistant that helps the user manage their
   click, scroll, press_keys or type_text on it: they are slower and miss. If an element
   isn't listed, scroll or read the next part; use browser_screenshot only to look at
   images.
-- Apps on the desktop: open them with open_app, then call read_window and act with
-  click_element on the numbers it lists; to fill a field, click_element it and then
-  type_text. Only if read_window finds nothing useful, use look_at_screen and click with
-  coordinates from the image. Shortcuts go through press_keys, passing the window title
-  (list_windows shows them).
+- Apps on the desktop: open them with open_app, then call read_window and act on the
+  numbers it lists: click_element for buttons, menus and links, fill_field for text
+  fields. A [disabled] button usually needs something first (e.g. text in a field).
+  Only if read_window finds nothing useful, use look_at_screen and click with coordinates
+  from the image; for small icons, look closely and aim at their center. Shortcuts go
+  through press_keys, passing the window title (list_windows shows them).
+- When the user asks to open "the browser" to do something, use your own (browser_open).
+- To close a program, use close_window. Use kill_process only if it hangs or the user asks;
+  never kill every process of an app (e.g. all msedge.exe): that loses the user's work.
   After acting, check the result (read again or take a new screenshot) instead of assuming.
   If list_windows doesn't show the window you need, try read_window or look_at_screen
   before telling the user you can't find it.
@@ -572,6 +580,11 @@ class LiveAgent(QObject):
                                   "speaking. Briefly tell the user what you are doing or what "
                                   "is blocking you, and ask before going on if it isn't working.")
             transcript.tool(fc.name, args, result)
+            if transcript.enabled():
+                if fc.name == "click" and "error" not in result:
+                    transcript.shot(screen.last_jpeg(), "click", (args.get("x", 0), args.get("y", 0)))
+                elif image:
+                    transcript.shot(image, fc.name)
             parts = None
             if image:
                 parts = [types.FunctionResponsePart(inline_data=types.FunctionResponseBlob(

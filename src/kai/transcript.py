@@ -2,13 +2,16 @@
 
 Off by default. When the user turns it on in Settings, what the user and kai
 say and every tool call (arguments and a shortened result) go to a separate
-file next to the logs. It is only uploaded if the user ticks "Include the
+file next to the logs, plus the last few screenshots kai took (already sent to
+Gemini), with its clicks marked. It is only uploaded if the user ticks "Include the
 recorded conversation" when sending diagnostics. Turning the option off in
 Settings deletes the file. API keys are redacted like in the logs.
 """
 
 from __future__ import annotations
 
+import base64
+import io
 import json
 import threading
 import time
@@ -18,6 +21,8 @@ from kai import logs
 
 MAX_BYTES = 500_000  # keep roughly the most recent 500 KB
 MAX_RESULT_CHARS = 400
+MAX_SHOTS = 12  # most recent screenshots kept
+SHOT_SIDE = 800
 
 _lock = threading.Lock()
 _enabled = False
@@ -42,9 +47,48 @@ def set_enabled(on: bool) -> None:
         _enabled = on
 
 
+def shots_dir() -> Path:
+    return logs.log_file().with_name("conversation_shots")
+
+
 def delete() -> None:
     path().unlink(missing_ok=True)
     path().with_name(path().name + ".old").unlink(missing_ok=True)
+    for f in shots_dir().glob("*.jpg") if shots_dir().exists() else []:
+        f.unlink(missing_ok=True)
+
+
+def shot(jpeg: bytes, label: str, point: tuple[float, float] | None = None) -> None:
+    """Keep a copy of a screenshot kai took; point (0-1000 coords) marks a click."""
+    if not _enabled or not jpeg:
+        return
+    from PIL import Image, ImageDraw
+
+    img = Image.open(io.BytesIO(jpeg)).convert("RGB")
+    img.thumbnail((SHOT_SIDE, SHOT_SIDE))
+    if point is not None:
+        x, y = point[0] / 1000 * (img.width - 1), point[1] / 1000 * (img.height - 1)
+        draw = ImageDraw.Draw(img)
+        for r, color in ((9, "white"), (7, "red")):
+            draw.ellipse((x - r, y - r, x + r, y + r), outline=color, width=2)
+        draw.line((x - 12, y, x + 12, y), fill="red")
+        draw.line((x, y - 12, x, y + 12), fill="red")
+    folder = shots_dir()
+    folder.mkdir(exist_ok=True)
+    name = f"{time.strftime('%Y%m%d-%H%M%S')}-{int(time.time() * 1000) % 1000:03d}-{label}.jpg"
+    img.save(folder / name, "JPEG", quality=55)
+    for old in sorted(folder.glob("*.jpg"))[:-MAX_SHOTS]:
+        old.unlink(missing_ok=True)
+    with _lock:
+        _write(f"-- screenshot {name}")
+
+
+def read_shots() -> dict[str, str]:
+    """Kept screenshots as base64 JPEGs, by file name."""
+    if not shots_dir().exists():
+        return {}
+    return {f.name: base64.b64encode(f.read_bytes()).decode()
+            for f in sorted(shots_dir().glob("*.jpg"))}
 
 
 def _write(line: str) -> None:

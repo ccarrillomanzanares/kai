@@ -17,7 +17,7 @@ from __future__ import annotations
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from kai.tools import desktop
 from kai.tools.apps import match_app
@@ -35,6 +35,8 @@ class Element:
     rect: tuple[int, int, int, int]  # left, top, width, height in screen pixels
     value: str = ""
     enabled: bool = True
+    # The live accessibility object, to press or fill it without the mouse.
+    handle: object = field(default=None, repr=False, compare=False)
 
     def describe(self) -> str:
         text = self.role + (f' "{self.name}"' if self.name else "")
@@ -102,7 +104,7 @@ def _windows_elements(win) -> list[Element]:
             if role in ("text", "document") and not (name or value):
                 continue
             found.append(Element(role, name, (r.left, r.top, r.width(), r.height()), value,
-                                 bool(ctrl.IsEnabled)))
+                                 bool(ctrl.IsEnabled), ctrl))
         except Exception:  # elements can vanish while we walk
             continue
     return found
@@ -175,7 +177,7 @@ def _linux_elements(title: str) -> tuple[str, list[Element]]:
                         pass
                 if e.width >= 2 and e.height >= 2 and (name or value or role != "text"):
                     found.append(Element(role, name, (e.x, e.y, e.width, e.height), value,
-                                         states.contains(Atspi.StateType.SENSITIVE)))
+                                         states.contains(Atspi.StateType.SENSITIVE), acc))
             for i in range(acc.get_child_count()):
                 child = acc.get_child_at_index(i)
                 if child is not None:
@@ -226,17 +228,100 @@ def describe(number: int) -> str:
     return f"{element.describe()} in '{_last_window}'" if element else f"element {number}"
 
 
-def click_element(number: int, double: bool = False, button: str = "left") -> str:
-    from kai.tools import screen
-
+def _get(number: int) -> Element:
     element = _last.get(int(number))
     if element is None:
         raise LookupError(f"No element {number}. Call read_window first.")
+    if not element.enabled:
+        raise ValueError(f"{element.describe()} is disabled, so clicking it does nothing. "
+                         "It usually needs something first (e.g. text in a field). Read the "
+                         "window again to check.")
+    return element
+
+
+def _on_uia_thread(fn, *args):
+    if _uia_executor is None:
+        return fn(*args)
+    return _uia_executor.submit(fn, *args).result(timeout=15)
+
+
+def _press(element: Element) -> bool:
+    """Press a button or link through accessibility: immune to popups covering it."""
+    if element.handle is None or element.role not in ("button", "link"):
+        return False
+    try:
+        if sys.platform == "win32":
+            def invoke():
+                element.handle.GetInvokePattern().Invoke()
+            _on_uia_thread(invoke)
+        else:
+            Atspi = _atspi()
+            if not Atspi.Action.do_action(element.handle, 0):
+                return False
+        return True
+    except Exception:  # no such pattern/action: fall back to the mouse
+        return False
+
+
+def _set_value(element: Element, text: str) -> bool:
+    if element.handle is None:
+        return False
+    try:
+        if sys.platform == "win32":
+            def set_value():
+                element.handle.GetValuePattern().SetValue(text)
+            _on_uia_thread(set_value)
+            return True
+        Atspi = _atspi()
+        return bool(Atspi.EditableText.set_text_contents(element.handle, text))
+    except Exception:  # read-only or custom field: type instead
+        return False
+
+
+def _focus_window() -> None:
     try:
         desktop.focus_window(_last_window)
     except LookupError:
-        pass  # not listed by the window manager; the element is visible, click anyway
+        pass  # not listed by the window manager; the element is visible, act anyway
+
+
+def _center(element: Element) -> tuple[int, int]:
     left, top, width, height = element.rect
-    screen.click_point(left + width // 2, top + height // 2, button, double)
-    return (f"Clicked {element.describe()} in '{_last_window}'. "
-            "Read the window again to see the result; numbers may change.")
+    return left + width // 2, top + height // 2
+
+
+CHECK_AFTER = ("This only says the input was sent: read the window again (numbers may "
+               "change) or look at the screen before telling the user it worked.")
+
+
+def click_element(number: int, double: bool = False, button: str = "left") -> str:
+    from kai.tools import screen
+
+    element = _get(number)
+    _focus_window()
+    if not double and button == "left" and _press(element):
+        return f"Pressed {element.describe()} in '{_last_window}'. {CHECK_AFTER}"
+    screen.click_point(*_center(element), button, double)
+    return f"Clicked {element.describe()} in '{_last_window}'. {CHECK_AFTER}"
+
+
+def fill_field(number: int, text: str) -> str:
+    from pynput.keyboard import Controller, Key
+
+    from kai.tools import screen
+
+    element = _get(number)
+    _focus_window()
+    if _set_value(element, text):
+        how = "Set"
+    else:
+        # Click into the field, select what's there and type over it. No window
+        # re-activation in between: that can move the focus out of the field.
+        screen.click_point(*_center(element))
+        kb = Controller()
+        with kb.pressed(Key.ctrl):
+            kb.press("a")
+            kb.release("a")
+        kb.type(text)
+        how = "Typed"
+    return f"{how} the text of {element.describe()} in '{_last_window}'. {CHECK_AFTER}"

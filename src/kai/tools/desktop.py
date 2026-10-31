@@ -27,12 +27,26 @@ _KEY_ALIASES = {
 }
 
 
+# Invisible helper windows Windows reports as top-level windows.
+_NOISE = {"CoreInput", "DesktopWindowXamlSource", "Chrome Legacy Window",
+          "Default IME", "MSCTFIME UI", "Program Manager"}
+
+
+def _is_real(w) -> bool:
+    title = w.title.strip()
+    if not title or title in _NOISE or title.startswith("&"):  # "&Save" = a control
+        return False
+    try:
+        return w.isVisible and w.width >= 80 and w.height >= 40
+    except Exception:
+        return False
+
+
 def _windows():
     import pywinctl
 
     own = {"kai", "kai needs your permission", "Send diagnostics", "Settings"}
-    return [w for w in pywinctl.getAllWindows()
-            if w.title.strip() and w.title not in own and w.isVisible]
+    return [w for w in pywinctl.getAllWindows() if w.title not in own and _is_real(w)]
 
 
 def list_windows() -> list[str]:
@@ -52,9 +66,25 @@ def focus_window(title: str) -> str:
     win = _find_window(title)
     if win.isMinimized:
         win.restore()
-    win.activate(wait=True)
-    time.sleep(FOCUS_DELAY)
+    try:
+        active = win.isActive
+    except Exception:
+        active = False
+    if not active:  # re-activating can move the keyboard focus out of the field in use
+        win.activate(wait=True)
+        time.sleep(FOCUS_DELAY)
     return f"Focused '{win.title}'"
+
+
+def close_window(title: str) -> str:
+    """Ask a window to close, like clicking its X: the app may ask to save first."""
+    win = _find_window(title)
+    name = win.title
+    win.close()
+    time.sleep(1.0)
+    still_open = any(w.title == name for w in _windows())
+    return (f"Asked '{name}' to close, but it is still open: it may be asking to save. "
+            "Look at it." if still_open else f"Closed '{name}'")
 
 
 def _ensure_target(window: str | None) -> str:
