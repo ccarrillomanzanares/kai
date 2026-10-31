@@ -15,7 +15,7 @@ from typing import Any, Callable
 
 from google.genai import types
 
-from kai.tools import apps, browser, desktop, files, screen, shell, system, uia
+from kai.tools import apps, browser, desktop, files, overlay, screen, shell, system, uia
 
 log = logging.getLogger(__name__)
 
@@ -276,6 +276,11 @@ TOOLS: dict[str, Tool] = {
 }
 
 
+# Tools that work on other apps' windows: kai folds its conversation panel first so it
+# doesn't cover them.
+ON_THE_DESKTOP = {"look_at_screen", "click", "scroll", "read_window", "click_element",
+                  "fill_field", "press_keys", "type_text", "focus_window", "open_app"}
+
 # Key of the JPEG in a tool result; live.py sends it as an image part, not as JSON.
 IMAGE_KEY = "_image"
 
@@ -319,6 +324,8 @@ def call(name: str, args: dict[str, Any] | None, confirm: Confirm | None = None,
             if confirm is None or not confirm(title, detail):
                 log.info("Tool %s: declined by the user", name)
                 return {"error": "The user declined this action."}
+        if name in ON_THE_DESKTOP:
+            overlay.step_aside()
         result = tool.func(**args)
         if isinstance(result, screen.Image):
             return {"result": result.text, IMAGE_KEY: result.jpeg}

@@ -102,8 +102,9 @@ About the kai app itself, so you can help the user with it:
   level: "Ask for everything", "Ask before risky actions" (default: commands, closing
   programs, typing in terminals) or "Only ask before destructive commands". Commands that
   delete, uninstall or shut down always ask.
-  The window can be moved by dragging it. If kai's own bar or conversation covers what
-  you need to see or click, ask the user to move it or close the conversation panel.
+  The window can be moved by dragging it. While kai works in other apps it folds its
+  conversation panel (it comes back when kai talks), is left out of screenshots and
+  moves away if a click would land on it.
 - Settings also has an option for the headset or keyboard play/pause button to mute
   and unmute the microphone.
 - kai uses Google's Gemini 3.8 Live with the user's own free API key from Google AI Studio,

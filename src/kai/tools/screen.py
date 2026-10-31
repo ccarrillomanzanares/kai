@@ -11,7 +11,7 @@ import io
 import time
 from dataclasses import dataclass
 
-from kai.tools import desktop
+from kai.tools import desktop, overlay
 
 MAX_SIDE = 1280  # pixels: enough to read text, light on tokens
 JPEG_QUALITY = 70
@@ -46,6 +46,7 @@ def look_at_screen(window: str | None = None) -> Image:
     from PIL import Image as PILImage
 
     global _last_region, _last_jpeg
+    overlay.step_aside()
     try:
         sct = mss.mss()
     except Exception as e:
@@ -66,7 +67,8 @@ def look_at_screen(window: str | None = None) -> Image:
             region = dict(sct.monitors[1])  # the primary screen
             what = "the screen"
         try:
-            shot = sct.grab(region)
+            with overlay.hidden():
+                shot = sct.grab(region)
         except mss.exception.ScreenShotError as e:
             raise RuntimeError(
                 "The screen can't be captured right now. On Windows this happens while a "
@@ -92,6 +94,7 @@ def _to_screen(x: float, y: float) -> tuple[int, int]:
 def click_point(px: int, py: int, button: str = "left", double: bool = False) -> None:
     from pynput.mouse import Button, Controller
 
+    overlay.step_aside((px, py))
     mouse = Controller()
     mouse.position = (px, py)
     time.sleep(0.05)

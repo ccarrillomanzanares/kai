@@ -126,7 +126,7 @@ class MainWindow(QWidget):
     def toggle_panel(self) -> None:
         self.set_panel_visible(not self.panel.isVisible())
 
-    def set_panel_visible(self, visible: bool) -> None:
+    def set_panel_visible(self, visible: bool, focus: bool = True) -> None:
         if visible == self.panel.isVisible():
             return
         bottom = self.geometry().bottom()
@@ -134,7 +134,7 @@ class MainWindow(QWidget):
         height = BAR_HEIGHT + (PANEL_HEIGHT if visible else 0)
         self.setFixedSize(WIDTH, height)
         self.move(self.x(), bottom - height + 1)  # grow upwards, keep the bar in place
-        if visible:
+        if visible and focus:
             self.input.setFocus()
 
     def paintEvent(self, event) -> None:

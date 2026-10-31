@@ -14,6 +14,7 @@ from kai import __version__, config, diag, logs, transcript, voices
 from kai.headset import HeadsetButton
 from kai.tools import browser
 from kai.tools import Permission
+from kai.ui.aside import Aside
 from kai.ui.confirm_dialog import ConfirmDialog
 from kai.ui.diag_dialog import DiagDialog
 from kai.ui.main_window import MainWindow
@@ -33,6 +34,7 @@ class Controller:
         window.change_key_requested.connect(self.change_key)
         window.diagnostics_requested.connect(self.open_diagnostics)
         window.settings_requested.connect(self.open_settings)
+        self.aside = Aside(window)
         self.headset = HeadsetButton()
         self.headset.pressed.connect(lambda: window.mic_btn.toggle())
         self.headset.set_enabled(config.load_settings()["headset_button"])
@@ -53,6 +55,7 @@ class Controller:
                                                          settings["custom_accent"]),
         )
         a.state_changed.connect(self.window.set_state)
+        a.state_changed.connect(self.aside.on_state)
         a.level.connect(self.window.set_level)
         a.user_said.connect(lambda t: self.window.append("you", t))
         a.kai_said.connect(lambda t: self.window.append("kai", t))
@@ -182,6 +185,7 @@ def main() -> int:
         tray = Tray(window)
         tray.show()
     window.show()
+    controller.aside.exclude_from_capture()
 
     if config.get_api_key():
         controller.start_agent()

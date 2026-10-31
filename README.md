@@ -37,6 +37,13 @@ python -m venv --system-site-packages .venv
 - **Screenshots**: when that isn't enough, kai takes a screenshot (only when needed,
   never in the background) and clicks by position. Screenshots are sent to Google like
   the rest of the conversation. With "Ask for everything" kai asks before each one.
+- **Out of the way**: while kai works in another app it folds its conversation panel
+  (it comes back when kai speaks), leaves itself out of screenshots and moves its bar if
+  a click would land on it.
+- **Downloads** from kai's browser are saved to your Downloads folder.
+- **Headset button**: in Settings you can make the play/pause button of a headset or
+  keyboard mute and unmute the microphone.
+
 Without an audio device kai still works as a text chat.
 
 You can also set the key with the `GEMINI_API_KEY` environment variable.
