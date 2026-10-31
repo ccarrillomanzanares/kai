@@ -108,6 +108,7 @@ def validate_api_key(key: str) -> str | None:
 DEFAULT_SETTINGS = {
     "voice": None, "accent": "auto", "custom_accent": "", "permissions": "balanced",
     "microphone": None, "detailed_logs": True, "record_conversation": False,
+    "headset_button": False,
 }
 
 

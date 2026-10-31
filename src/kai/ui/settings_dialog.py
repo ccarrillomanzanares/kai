@@ -80,6 +80,11 @@ class SettingsDialog(QDialog):
         self.record.setChecked(self._settings["record_conversation"])
         self.record.toggled.connect(self._confirm_record)
 
+        self.headset = QCheckBox("Headset play/pause button turns the microphone on/off")
+        self.headset.setToolTip("Works with any headset or keyboard play/pause key, even when "
+                                "kai is in the background. Music players still get the key.")
+        self.headset.setChecked(self._settings["headset_button"])
+
         form = QFormLayout()
         form.setSpacing(12)
         form.addRow("Microphone", self.microphone)
@@ -88,6 +93,7 @@ class SettingsDialog(QDialog):
         form.addRow("", self.custom)
         form.addRow("Permissions", self.permissions)
         form.addRow("", self.permission_hint)
+        form.addRow("", self.headset)
         form.addRow("", self.detailed_logs)
         form.addRow("", self.record)
 
@@ -148,6 +154,7 @@ class SettingsDialog(QDialog):
             microphone=self.microphone.currentData(),
             detailed_logs=self.detailed_logs.isChecked(),
             record_conversation=self.record.isChecked(),
+            headset_button=self.headset.isChecked(),
         )
         config.save_settings(self._settings)
         self.accept()

@@ -133,6 +133,8 @@ def press_keys(keys: str, window: str | None = None) -> str:
 
     combo = _parse_keys(keys)
     target = _ensure_target(window)
+    from kai import headset
+    headset.ignore_own_press()  # don't let kai's own media keys toggle the microphone
     kb = Controller()
     for k in combo:
         kb.press(k)

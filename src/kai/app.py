@@ -11,6 +11,7 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication, QDialog, QSystemTrayIcon
 
 from kai import __version__, config, diag, logs, transcript, voices
+from kai.headset import HeadsetButton
 from kai.tools import browser
 from kai.tools import Permission
 from kai.ui.confirm_dialog import ConfirmDialog
@@ -32,6 +33,9 @@ class Controller:
         window.change_key_requested.connect(self.change_key)
         window.diagnostics_requested.connect(self.open_diagnostics)
         window.settings_requested.connect(self.open_settings)
+        self.headset = HeadsetButton()
+        self.headset.pressed.connect(lambda: window.mic_btn.toggle())
+        self.headset.set_enabled(config.load_settings()["headset_button"])
 
     def start_agent(self) -> None:
         from kai.live import LiveAgent
@@ -79,6 +83,7 @@ class Controller:
             return
         after = config.load_settings()
         transcript.set_enabled(after["record_conversation"] or self.record_run)
+        self.headset.set_enabled(after["headset_button"])
         if before["record_conversation"] and not after["record_conversation"]:
             transcript.delete()
         if not self.agent:
@@ -171,6 +176,7 @@ def main() -> int:
     controller = Controller(window, record_run=opts.record)
     window.quit_requested.connect(app.quit)
     app.aboutToQuit.connect(controller.stop_agent)
+    app.aboutToQuit.connect(controller.headset.stop)
     app.aboutToQuit.connect(browser.shutdown)  # close kai's browser window too
     if QSystemTrayIcon.isSystemTrayAvailable():
         tray = Tray(window)
