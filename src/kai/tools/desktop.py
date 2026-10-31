@@ -1,6 +1,6 @@
 """Desktop control: windows, typing and keyboard shortcuts.
 
-Works on Windows, macOS (needs the Accessibility permission) and Linux on X11.
+Works on Windows and Linux on X11.
 Wayland sessions block synthetic input and window control by design.
 """
 

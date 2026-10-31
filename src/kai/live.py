@@ -25,6 +25,8 @@ from kai.config import MODEL
 
 log = logging.getLogger(__name__)
 
+LONG_RUN = 8  # tool calls without speaking before kai is nudged to check in with the user
+
 SYSTEM_PROMPT = """\
 You are kai, a calm and concise voice assistant that helps the user manage their computer.
 - Always answer in the language the user speaks to you.
@@ -35,17 +37,29 @@ You are kai, a calm and concise voice assistant that helps the user manage their
   (settings, network, installed software, moving or renaming files, etc.) use run_command
   with a command for the user's operating system. Don't tell the user you can't do
   something on the computer before considering run_command.
-- To work inside an app (write in Notepad, open a new tab, save…): open it with open_app,
-  then use type_text and press_keys passing the window title (list_windows shows them).
+- Web tasks (search, read a page, use a site, fill a form): use your own browser with
+  browser_open, browser_read, browser_click, browser_type, browser_scroll and browser_back.
+  They show the page text and numbered elements, so you know what is there. For a search,
+  open the search URL directly. Use open_url only when the user wants a page opened in
+  their usual browser for themselves.
+- Apps on the desktop: open them with open_app, then see before acting: read_window lists
+  the window's buttons, fields and menus to use with click_element; if it finds little,
+  use look_at_screen and click with coordinates from the image. Type with type_text and
+  shortcuts with press_keys, passing the window title (list_windows shows them).
+  After acting, check the result (read again or take a new screenshot) instead of assuming.
+  If list_windows doesn't show the window you need, try read_window or look_at_screen
+  before telling the user you can't find it.
+- Never act blindly: don't chain keystrokes hoping they work. If you can't see how to do
+  something after a few tries, tell the user what you see and ask.
   Never simulate the keyboard through run_command: those commands run hidden and can't
-  reach the user's windows. If a step fails, check list_windows instead of retrying blindly.
+  reach the user's windows.
 - Depending on the user's permission level, some actions show a confirmation window.
   If a tool result says the user declined, accept it and don't insist.
 - Prefer read-only commands to look before changing anything. Never run destructive
   commands (deleting, formatting, uninstalling) unless the user explicitly asked for it.
 
 About the kai app itself, so you can help the user with it:
-- kai is a desktop app for Linux, Windows and macOS: a slim floating bar above the taskbar
+- kai is a desktop app for Windows and Linux: a slim floating bar above the taskbar
   with a thin line of light: a coral glow glides along it while listening (and swells with
   the user's voice), two violet glows cross while thinking, and it becomes a waveform
   while speaking. Clicking the line opens the conversation and a text field to type. The bar can be dragged anywhere. A tray icon shows or hides kai.
@@ -145,6 +159,7 @@ class LiveAgent(QObject):
         self._reconnect_now: asyncio.Event | None = None
         self._turn = _Turn()
         self._user_spoke_at: float | None = None  # last user words, across tool turns
+        self._silent_tools = 0  # tool calls since kai or the user last spoke
 
     # ---- public API (call from the UI thread) ----
 
@@ -498,11 +513,13 @@ class LiveAgent(QObject):
             turn.user_chars += len(sc.input_transcription.text)
             self.user_said.emit(sc.input_transcription.text)
             transcript.said("user", sc.input_transcription.text)
+            self._silent_tools = 0
             self._set_state(State.THINKING)
         if sc.output_transcription and sc.output_transcription.text:
             turn.kai_chars += len(sc.output_transcription.text)
             self.kai_said.emit(sc.output_transcription.text)
             transcript.said("kai", sc.output_transcription.text)
+            self._silent_tools = 0
         if sc.generation_complete:
             log.debug("Generation complete")
         if sc.waiting_for_input:
@@ -531,7 +548,20 @@ class LiveAgent(QObject):
                 self.ui_action.emit(fc.name)
             log.info("Tool %s: %s in %.2fs", fc.name, "error" if "error" in result else "ok",
                      time.monotonic() - started)
+            image = result.pop(tools.IMAGE_KEY, None)
+            self._silent_tools += 1
+            if self._silent_tools in (LONG_RUN, 2 * LONG_RUN):
+                log.info("%d tool calls in a row without speaking", self._silent_tools)
+                result["note"] = (f"You have used {self._silent_tools} tools in a row without "
+                                  "speaking. Briefly tell the user what you are doing or what "
+                                  "is blocking you, and ask before going on if it isn't working.")
             transcript.tool(fc.name, args, result)
-            responses.append(types.FunctionResponse(id=fc.id, name=fc.name, response=result))
+            parts = None
+            if image:
+                parts = [types.FunctionResponsePart(inline_data=types.FunctionResponseBlob(
+                    data=image, mime_type="image/jpeg"))]
+                log.debug("Tool %s attached a %d KB image", fc.name, len(image) // 1024)
+            responses.append(types.FunctionResponse(id=fc.id, name=fc.name, response=result,
+                                                    parts=parts))
         if responses:
             await s.send_tool_response(function_responses=responses)

@@ -15,7 +15,7 @@ from typing import Any, Callable
 
 from google.genai import types
 
-from kai.tools import apps, desktop, files, shell, system
+from kai.tools import apps, browser, desktop, files, screen, shell, system, uia
 
 log = logging.getLogger(__name__)
 
@@ -127,6 +127,20 @@ TOOLS: dict[str, Tool] = {
              "Open a file with its default application, or a folder in the file manager.",
              _params(["path"], path=("string", "File or folder path, ~ allowed.")),
              apps.open_path, Risk.SAFE),
+        Tool("look_at_screen",
+             "Take a screenshot so you can see the screen (or one window) as an image. Use it "
+             "before acting in apps, when unsure what's on screen, and to check the result. "
+             "kai's own bar may appear at the bottom.",
+             _params(window=("string", "Optional window title to capture just that window.")),
+             screen.look_at_screen, Risk.SAFE,
+             confirm_text=lambda window=None: (
+                 "Look at the screen", f"Send a screenshot of {window or 'the screen'} to Gemini")),
+        Tool("read_window",
+             "List the buttons, fields, menus, links and texts of an app window through the "
+             "system accessibility tree, numbered for click_element. More exact than a "
+             "screenshot; if it finds little, use look_at_screen.",
+             _params(["window"], window=("string", "Window title or part of it.")),
+             uia.read_window, Risk.READ),
         Tool("list_windows",
              "List the titles of the open windows on the desktop.",
              _params(), desktop.list_windows, Risk.READ),
@@ -146,13 +160,76 @@ TOOLS: dict[str, Tool] = {
                  text if len(text) <= 600 else text[:600] + "…")),
         Tool("press_keys",
              "Press a key or shortcut in an app, e.g. 'ctrl+t' (new tab), 'ctrl+s', 'enter', "
-             "'alt+tab', 'ctrl+shift+esc'. Use 'cmd' instead of 'ctrl' on macOS. Always pass "
+             "'alt+tab', 'ctrl+shift+esc'. Always pass "
              "the target window's title.",
              _params(["keys", "window"], keys=("string", "Keys joined with '+'."),
                      window=("string", "Title (or part) of the window.")),
              desktop.press_keys, Risk.CONTROL,
              confirm_text=lambda keys, window=None: (
                  f"Press keys in {window or 'the active window'}", keys)),
+        Tool("click",
+             "Click at a point of the last look_at_screen image, with x and y from 0 to 1000 "
+             "(0,0 = top-left of that image). Use it when read_window can't see the element.",
+             _params(["x", "y"], x=("number", "0-1000 from the left edge of the screenshot."),
+                     y=("number", "0-1000 from the top edge of the screenshot."),
+                     button=("string", "'left' (default) or 'right'."),
+                     double=("boolean", "True for a double-click.")),
+             screen.click, Risk.CONTROL,
+             confirm_text=lambda x, y, button="left", double=False: (
+                 "Click on the screen", f"{'Double-click' if double else button + ' click'} "
+                 f"at {x:g}, {y:g} of the last screenshot")),
+        Tool("scroll",
+             "Scroll the mouse wheel, optionally over a point of the last screenshot (0-1000).",
+             _params(["direction"], direction=("string", "'down' or 'up'."),
+                     amount=("integer", "Wheel steps, default 5."),
+                     x=("number", "Optional point to scroll over, 0-1000."),
+                     y=("number", "Optional point to scroll over, 0-1000.")),
+             screen.scroll, Risk.CONTROL),
+        Tool("click_element",
+             "Click an element listed by read_window, by its number. To type into a field, "
+             "click it, then use type_text with the window title.",
+             _params(["number"], number=("integer", "Element number from read_window."),
+                     double=("boolean", "True for a double-click."),
+                     button=("string", "'left' (default) or 'right'.")),
+             uia.click_element, Risk.CONTROL,
+             confirm_text=lambda number, double=False, button="left": (
+                 "Click in an app", uia.describe(number))),
+        # ---- kai's browser ----
+        Tool("browser_open",
+             "Open a web page in kai's own browser window, which kai can read and control. "
+             "Use it for any web task (searching, reading, filling forms). Returns the page "
+             "title, URL, the numbered links/buttons/fields in view and the page text.",
+             _params(["url"], url=("string", "URL; for searches use e.g. "
+                                    "'https://duckduckgo.com/?q=…' or 'https://www.google.com/search?q=…'.")),
+             browser.browser_open, Risk.SAFE),
+        Tool("browser_read",
+             "Read kai's browser page again: numbered elements in view and the page text. "
+             "Long pages come in parts; pass part=2, 3… to read on.",
+             _params(part=("integer", "Text part to read, default 1.")),
+             browser.browser_read, Risk.READ),
+        Tool("browser_click", "Click a link, button or other element of kai's browser page "
+             "by its number. Returns the updated page.",
+             _params(["element"], element=("integer", "Element number from the last read.")),
+             browser.browser_click, Risk.CONTROL,
+             confirm_text=lambda element: ("Click in kai's browser", browser.describe(element))),
+        Tool("browser_type",
+             "Type into a field of kai's browser page by its number (replaces its content). "
+             "submit=true presses Enter afterwards, e.g. to search.",
+             _params(["element", "text"], element=("integer", "Field number from the last read."),
+                     text=("string", "Text to type."),
+                     submit=("boolean", "Press Enter after typing.")),
+             browser.browser_type, Risk.CONTROL,
+             confirm_text=lambda element, text, submit=False: (
+                 f"Type in kai's browser ({browser.describe(element)})", text[:600])),
+        Tool("browser_scroll", "Scroll kai's browser page down or up and read what comes into view.",
+             _params(["direction"], direction=("string", "'down' or 'up'.")),
+             browser.browser_scroll, Risk.READ),
+        Tool("browser_back", "Go back to the previous page in kai's browser.",
+             _params(), browser.browser_back, Risk.SAFE),
+        Tool("browser_screenshot",
+             "See kai's browser page as an image, for images, charts or layouts the text "
+             "doesn't capture.",
+             _params(), browser.browser_screenshot, Risk.READ),
         Tool("open_diagnostics",
              "Open kai's 'Send diagnostics' window so the user can review and send a report "
              "with kai's logs and system info (no conversations, no API key). Use it when the "
@@ -179,6 +256,10 @@ TOOLS: dict[str, Tool] = {
              confirm_text=lambda pid: ("Close a program", shell.describe_kill(pid))),
     ]
 }
+
+
+# Key of the JPEG in a tool result; live.py sends it as an image part, not as JSON.
+IMAGE_KEY = "_image"
 
 
 def declarations() -> list[types.Tool]:
@@ -220,7 +301,12 @@ def call(name: str, args: dict[str, Any] | None, confirm: Confirm | None = None,
             if confirm is None or not confirm(title, detail):
                 log.info("Tool %s: declined by the user", name)
                 return {"error": "The user declined this action."}
-        return {"result": tool.func(**args)}
+        result = tool.func(**args)
+        if isinstance(result, screen.Image):
+            return {"result": result.text, IMAGE_KEY: result.jpeg}
+        if isinstance(result, bytes):  # a bare JPEG
+            return {"result": "Image attached.", IMAGE_KEY: result}
+        return {"result": result}
     except Exception as e:
         # Only the exception type: messages can echo the user's arguments.
         log.warning("Tool %s raised %s", name, type(e).__name__)

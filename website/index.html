@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>kai — talk to your computer</title>
-  <meta name="description" content="kai is a minimalist voice assistant that helps you manage your computer. Powered by Gemini Live. Free, open source, for Linux, Windows and macOS.">
+  <meta name="description" content="kai is a minimalist voice assistant that helps you manage your computer. Powered by Gemini Live. Free, open source, for Windows and Linux.">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="style.css">
 </head>
@@ -29,7 +29,7 @@
         <a class="btn primary" href="#download">Get kai</a>
         <a class="btn" href="https://github.com/ccarrillomanzanares/kai">View source</a>
       </div>
-      <p class="small">Free · Open source · Linux, Windows &amp; macOS</p>
+      <p class="small">Free · Open source · Windows &amp; Linux</p>
     </section>
 
     <section id="features" class="wrap">
@@ -45,11 +45,11 @@
         </article>
         <article>
           <h3>Acts for you</h3>
-          <p>Opens apps, files and websites. Anything sensitive, like deleting or closing, always asks you first.</p>
+          <p>Opens apps, searches and browses the web in its own window, clicks, types and fills forms. Anything sensitive, like deleting or closing, asks you first.</p>
         </article>
         <article>
-          <h3>Sees your screen <span class="soon">soon</span></h3>
-          <p>Only when you ask it to look. Nothing is captured in the background.</p>
+          <h3>Sees what it does</h3>
+          <p>It reads web pages and app windows like a screen reader does, and takes a screenshot only when it needs to look. Nothing is captured in the background.</p>
         </article>
         <article>
           <h3>Your key, your machine</h3>
@@ -78,14 +78,16 @@
 
     <section id="download" class="wrap">
       <h2>Download</h2>
-      <p>Installers for Linux, Windows and macOS are on the way. Until then, run kai from source
+      <p>Installers for Windows and Linux are on the way. Until then, run kai from source
         (Python 3.11+):</p>
       <pre><code>git clone https://github.com/ccarrillomanzanares/kai
 cd kai
-python -m venv .venv &amp;&amp; . .venv/bin/activate
+python -m venv .venv &amp;&amp; . .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e .
 kai</code></pre>
-      <p class="note">On Linux you also need PortAudio for audio: <code>sudo apt install libportaudio2</code>.</p>
+      <p class="note">On Linux you also need PortAudio for audio (<code>sudo apt install libportaudio2</code>) and an X11 session.
+        To let kai read app windows, install <code>python3-gi gir1.2-atspi-2.0</code> and create the environment with
+        <code>python -m venv --system-site-packages .venv</code>. macOS is not supported for now.</p>
     </section>
   </main>
 

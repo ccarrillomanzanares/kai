@@ -1,6 +1,6 @@
 # kai — Initial analysis
 
-A voice AI agent that helps manage the computer (Linux, Windows, macOS), using
+A voice AI agent that helps manage the computer (Windows and Linux), using
 **Gemini 3.8 Live** as its conversational model, with a minimalist look.
 
 _Analysis date: 2026-10-30. Sources: official Google AI for Developers documentation._
@@ -41,11 +41,25 @@ Session limits that shape the design:
 
 ## 3. Planned features
 
-### Vision
-- **Look at the screen on demand**: the model calls `capture_screen()` and receives a JPEG.
-  Saves quota and respects privacy.
-- Optional **screen sharing mode**: ≤1 fps frames while active, with a visible indicator.
-- Optional webcam (later).
+### Vision: how kai sees (implemented 2026-10-31)
+Field tests showed that without vision kai chained dozens of blind keystrokes (one request:
+~60 tool calls and 54 s of silence). kai now has three ways to see, from most to least exact:
+
+1. **Its own browser** (`tools/browser.py`, Playwright): a separate Edge/Chrome window
+   (Playwright's Chromium if neither is installed) with its own profile. Every read
+   returns the page title, URL, text and a numbered list of the links, buttons and fields
+   in view; kai clicks and types by number. Best for anything on the web.
+2. **Accessibility tree** (`tools/uia.py`): the same data screen readers use. Windows: UI
+   Automation (`uiautomation`). Linux: AT-SPI through PyGObject. Lists a window's buttons,
+   fields, menus and texts with exact positions; kai clicks their centres.
+3. **Screenshots** (`tools/screen.py`, `mss` + `Pillow`): on demand only, of the screen or
+   one window, at most 1280 px. kai clicks with coordinates normalized to 0-1000 over the
+   image, which Gemini handles well (3/3 hits in tests).
+
+Findings about Gemini 3.8 Live:
+- An image must travel **inside the function response** (`FunctionResponse.parts`). Sent
+  as a realtime video frame during a tool call, the model ignored it and made up the screen.
+- kai is nudged to talk to the user after 8 tool calls in a row without speaking.
 
 ### Computer control (via function calling)
 By risk level:
@@ -70,26 +84,29 @@ By risk level:
 
 ## 4. Stack
 
-**Python + PySide6 (Qt)**, packaged with PyInstaller for all three OSes.
+**Python + PySide6 (Qt)**, to be packaged with PyInstaller for Windows and Linux.
+macOS is not supported for now (no test machine); some code paths exist but are untested.
 
 | Need | Library |
 |---|---|
 | Gemini Live | `google-genai` (official SDK) |
 | Audio | `sounddevice` |
 | Screenshots | `mss` + `Pillow` |
+| Browser control | `playwright` |
+| Accessibility | `uiautomation` (Windows), AT-SPI via PyGObject (Linux) |
 | System info / processes | `psutil` |
-| Mouse and keyboard | `pynput` / `pyautogui` |
+| Mouse and keyboard | `pynput` |
 | Secure API key | `keyring` |
 | UI | `PySide6` |
 
-Platform notes: macOS needs _Accessibility_, _Screen Recording_ and _Microphone_ permissions.
-On Linux under Wayland, input control and screenshots are limited (best on X11 or via portals).
+Platform notes: on Linux under Wayland, input control and screenshots are blocked (use an
+X11 session). Reading windows on Linux needs AT-SPI (`python3-gi`, `gir1.2-atspi-2.0`).
 
 ## 5. Roadmap
 
 1. **MVP**: minimal window, API key management, voice and text conversation with
    Gemini 3.8 Live, robust reconnection. ✅
-2. Read-only and safe tools, plus on-demand screen capture.
-3. Sensitive actions with confirmation, action log.
-4. Mouse/keyboard control and screen sharing mode.
-5. Packaging and installers for Linux, Windows and macOS.
+2. Read-only and safe tools, plus on-demand screen capture. ✅
+3. Sensitive actions with confirmation, three permission levels, diagnostics. ✅
+4. Mouse/keyboard control, own browser and accessibility tree. ✅
+5. Packaging and installers for Windows and Linux.
