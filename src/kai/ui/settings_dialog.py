@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import (
     QCheckBox,
+    QMessageBox,
     QComboBox,
     QDialog,
     QFormLayout,
@@ -72,6 +73,12 @@ class SettingsDialog(QDialog):
         self.detailed_logs = QCheckBox("Detailed logs (to help fix problems)")
         self.detailed_logs.setChecked(self._settings["detailed_logs"])
 
+        self.record = QCheckBox("Record conversations for diagnostics")
+        self.record.setToolTip("Saves what you and kai say, and kai's actions, on this "
+                               "computer. Sent only if you choose it when sending diagnostics.")
+        self.record.setChecked(self._settings["record_conversation"])
+        self.record.toggled.connect(self._confirm_record)
+
         form = QFormLayout()
         form.setSpacing(12)
         form.addRow("Microphone", self.microphone)
@@ -81,6 +88,7 @@ class SettingsDialog(QDialog):
         form.addRow("Permissions", self.permissions)
         form.addRow("", self.permission_hint)
         form.addRow("", self.detailed_logs)
+        form.addRow("", self.record)
 
         hint = QLabel("You can listen to every voice in Google AI Studio. Changing the "
                       "microphone, voice or accent starts a new conversation.",
@@ -109,6 +117,22 @@ class SettingsDialog(QDialog):
         self.custom.setVisible(self.accent.currentData() == CUSTOM)
         self.permission_hint.setText(PERMISSION_HINTS[Permission(self.permissions.currentData())])
 
+    def _confirm_record(self, on: bool) -> None:
+        if not on:
+            return
+        answer = QMessageBox.question(
+            self, "Record conversations",
+            "kai will save what you and kai say, and every action it takes (including what it "
+            "types and the web addresses it opens), in a file on this computer.\n\n"
+            "It is only sent if you tick \"Include the recorded conversation\" when sending "
+            "diagnostics. Turning this option off deletes the recording.\n\n"
+            "Turn on recording?",
+        )
+        if answer != QMessageBox.Yes:
+            self.record.blockSignals(True)
+            self.record.setChecked(False)
+            self.record.blockSignals(False)
+
     def voice_changed(self, before: dict) -> bool:
         keys = ("voice", "accent", "custom_accent", "microphone")
         return any(before[k] != self._settings[k] for k in keys)
@@ -121,6 +145,7 @@ class SettingsDialog(QDialog):
             permissions=self.permissions.currentData(),
             microphone=self.microphone.currentData(),
             detailed_logs=self.detailed_logs.isChecked(),
+            record_conversation=self.record.isChecked(),
         )
         config.save_settings(self._settings)
         self.accept()

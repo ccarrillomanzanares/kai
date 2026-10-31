@@ -2,8 +2,8 @@
 """kai diagnostics receiver. Runs on the VPS behind Apache.
 
 kai uploads a JSON report with POST https://ccmai.org/kai-diag/upload; Apache
-proxies it to 127.0.0.1:8092. Reports contain logs and system facts only,
-never conversations or API keys (see src/kai/diag.py).
+proxies it to 127.0.0.1:8092. Reports contain logs and system facts, never API
+keys; a conversation only when the user opted in (see src/kai/diag.py).
 
 kai is open source, so a shared upload token would not be secret. Abuse is
 limited instead by size, per-IP rate and total disk caps. Standard library only.

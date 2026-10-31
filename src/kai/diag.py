@@ -2,7 +2,8 @@
 
 What is sent: kai and library versions, OS details, audio devices, whether an
 API key is configured (never the key), and the tail of kai's log file.
-What is never sent: conversations, tool arguments, API keys.
+Never sent: API keys. Conversations and tool arguments are only included when
+the user turned on conversation recording and ticks it for this report.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ import urllib.error
 import urllib.request
 from importlib import metadata
 
-from kai import __version__, config, logs
+from kai import __version__, config, logs, transcript
 
 DIAG_URL = "https://ccmai.org/kai-diag/upload"
 MAX_LOG_BYTES = 400_000
@@ -74,8 +75,12 @@ def _log_tail() -> str:
     return logs.redact(data.decode("utf-8", errors="replace"))
 
 
-def collect() -> dict:
-    return {
+def has_conversation() -> bool:
+    return transcript.path().exists()
+
+
+def collect(include_conversation: bool = False) -> dict:
+    report = {
         "kai_version": __version__,
         "system": {
             "os": platform.system(),
@@ -91,6 +96,9 @@ def collect() -> dict:
         "api_key": _api_key_status(),
         "log": _log_tail(),
     }
+    if include_conversation and has_conversation():
+        report["conversation"] = transcript.read_tail()
+    return report
 
 
 def upload(report: dict) -> str:

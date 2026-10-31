@@ -18,7 +18,7 @@ from google import genai
 from google.genai import errors, types
 from PySide6.QtCore import QObject, Signal
 
-from kai import tools
+from kai import tools, transcript
 from kai import audio
 from kai.audio import IN_RATE, Microphone, Speaker
 from kai.config import MODEL
@@ -61,7 +61,10 @@ About the kai app itself, so you can help the user with it:
 - kai uses Google's Gemini 3.8 Live with the user's own free API key from Google AI Studio,
   stored in the system keychain. On the free tier Google may use conversations to improve
   its products; enabling billing on the key opts out.
-- kai does not store conversations: its log files only contain technical events.
+- kai does not store conversations by default: its log files only contain technical events.
+  For debugging, the user can turn on "Record conversations for diagnostics" in Settings; the
+  recording stays on the computer and is only sent if the user ticks it in the diagnostics
+  window. Turning the option off deletes it.
 - If the user reports a problem with kai, offer to open the diagnostics window with the
   open_diagnostics tool. It shows the report and only uploads it if the user clicks Send.
   The user then gets a short reference to share with the developer.
@@ -168,6 +171,7 @@ class LiveAgent(QObject):
             asyncio.run_coroutine_threadsafe(
                 self._session.send_realtime_input(text=text), self._loop
             )
+            transcript.typed(text)
 
     def set_mic_enabled(self, enabled: bool) -> None:
         if enabled != self._mic_enabled:
@@ -368,6 +372,7 @@ class LiveAgent(QObject):
                     self._last_server_msg = time.monotonic()
                     self._voiced_since_msg = 0
                     log.info("Connected to %s (resumed: %s)", MODEL, self._handle is not None)
+                    transcript.note("connected" + (" (resumed)" if self._handle else ""))
                     self._set_state(State.LISTENING)
                     backoff = 1
                     opened = time.monotonic()
@@ -492,10 +497,12 @@ class LiveAgent(QObject):
             turn.user_last = self._user_spoke_at = now
             turn.user_chars += len(sc.input_transcription.text)
             self.user_said.emit(sc.input_transcription.text)
+            transcript.said("user", sc.input_transcription.text)
             self._set_state(State.THINKING)
         if sc.output_transcription and sc.output_transcription.text:
             turn.kai_chars += len(sc.output_transcription.text)
             self.kai_said.emit(sc.output_transcription.text)
+            transcript.said("kai", sc.output_transcription.text)
         if sc.generation_complete:
             log.debug("Generation complete")
         if sc.waiting_for_input:
@@ -505,6 +512,7 @@ class LiveAgent(QObject):
                      sc.turn_complete_reason or "-", turn.user_chars, turn.kai_chars,
                      turn.audio_seconds)
             self._turn = _Turn()
+            transcript.turn_done()
             self.turn_done.emit()
             if not self._speaker.is_playing:
                 self._set_state(State.LISTENING)
@@ -523,6 +531,7 @@ class LiveAgent(QObject):
                 self.ui_action.emit(fc.name)
             log.info("Tool %s: %s in %.2fs", fc.name, "error" if "error" in result else "ok",
                      time.monotonic() - started)
+            transcript.tool(fc.name, args, result)
             responses.append(types.FunctionResponse(id=fc.id, name=fc.name, response=result))
         if responses:
             await s.send_tool_response(function_responses=responses)

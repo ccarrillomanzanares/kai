@@ -1,7 +1,8 @@
 """Logging to a rotating file in the config directory.
 
 Rule: never log what the user or kai said, nor tool arguments. Logs must be
-safe to send as diagnostics.
+safe to send as diagnostics. The opt-in conversation recording lives in its
+own file (see transcript.py).
 """
 
 from __future__ import annotations

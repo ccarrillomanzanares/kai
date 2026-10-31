@@ -7,6 +7,7 @@ import json
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QDialog,
     QHBoxLayout,
     QLabel,
@@ -20,7 +21,8 @@ from kai import diag
 INTRO = (
     "Send a diagnostics report to help fix problems. It includes kai's recent "
     "logs, versions, your OS and audio devices.<br><br>"
-    "<b>It never includes your conversations or your API key.</b>"
+    "<b>It never includes your API key, and includes your conversation only if you "
+    "tick it below.</b>"
 )
 
 
@@ -45,6 +47,12 @@ class DiagDialog(QDialog):
         self.setMinimumWidth(460)
         self._report = diag.collect()
         self._uploader: _Uploader | None = None
+
+        self.include = QCheckBox("Include the recorded conversation")
+        self.include.setToolTip("What you and kai said, and kai's actions. "
+                                "Use \"Show report\" to read it before sending.")
+        self.include.setVisible(diag.has_conversation())
+        self.include.toggled.connect(self._toggle_conversation)
 
         self.message = QLabel(INTRO, wordWrap=True)
         self.message.setTextInteractionFlags(Qt.TextSelectableByMouse)
@@ -72,8 +80,13 @@ class DiagDialog(QDialog):
         layout.setSpacing(16)
         layout.addWidget(QLabel("Send diagnostics", objectName="title"))
         layout.addWidget(self.message)
+        layout.addWidget(self.include)
         layout.addWidget(self.details)
         layout.addLayout(buttons)
+
+    def _toggle_conversation(self, on: bool) -> None:
+        self._report = diag.collect(include_conversation=on)
+        self.details.setPlainText(json.dumps(self._report, indent=2, ensure_ascii=False))
 
     def _toggle_details(self) -> None:
         self.details.setVisible(not self.details.isVisible())
@@ -82,6 +95,7 @@ class DiagDialog(QDialog):
 
     def _send(self) -> None:
         self.send_btn.setEnabled(False)
+        self.include.setEnabled(False)
         self.send_btn.setText("Sending…")
         self._uploader = _Uploader(self._report)
         self._uploader.done.connect(self._on_done)
@@ -91,6 +105,7 @@ class DiagDialog(QDialog):
         if error:
             self.message.setText(f'<span style="color:#f08a8a">{error}</span>')
             self.send_btn.setText("Retry")
+            self.include.setEnabled(True)
             self.send_btn.setEnabled(True)
             return
         QApplication.clipboard().setText(report_id)
@@ -99,6 +114,7 @@ class DiagDialog(QDialog):
             "Share it when you report the problem."
         )
         self.details.hide()
+        self.include.hide()
         self.details_btn.hide()
         self.cancel_btn.hide()
         self.send_btn.setText("Done")

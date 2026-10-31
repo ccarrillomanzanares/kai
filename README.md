@@ -27,8 +27,14 @@ You can also set the key with the `GEMINI_API_KEY` environment variable.
 If something goes wrong, use **⋯ → Send diagnostics…** (or `kai --send-diagnostics`).
 It uploads kai's recent logs, versions, OS and audio devices to `ccmai.org/kai-diag`
 and gives you a short reference. You can review the full report before sending.
-It never includes your conversations or your API key: kai does not log what is said,
-and keys are redacted. Logs live in kai's config folder under `logs/`.
+It never includes your API key, and by default no conversations: kai does not log
+what is said, and keys are redacted. Logs live in kai's config folder under `logs/`.
+
+For harder problems you can turn on **Settings → Record conversations for diagnostics**.
+kai then saves what you and kai say and every action it takes in `logs/conversation.log`,
+on your computer only. It is sent only if you tick **Include the recorded conversation**
+in the diagnostics window (or pass `--include-conversation`). Turning the option off
+deletes the recording.
 
 ## Project layout
 

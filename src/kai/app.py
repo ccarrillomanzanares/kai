@@ -10,7 +10,7 @@ import sys
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication, QDialog, QSystemTrayIcon
 
-from kai import __version__, config, diag, logs, voices
+from kai import __version__, config, diag, logs, transcript, voices
 from kai.tools import Permission
 from kai.ui.confirm_dialog import ConfirmDialog
 from kai.ui.diag_dialog import DiagDialog
@@ -73,9 +73,12 @@ class Controller:
     def open_settings(self) -> None:
         before = config.load_settings()
         dialog = SettingsDialog(self.window)
-        if dialog.exec() != QDialog.Accepted or not self.agent:
+        if dialog.exec() != QDialog.Accepted:
             return
         after = config.load_settings()
+        transcript.set_enabled(after["record_conversation"])
+        if not self.agent:
+            return
         changed = sorted(k for k in after if after[k] != before.get(k))
         logging.getLogger("kai").info("Settings changed: %s", ", ".join(changed) or "nothing")
         logs.set_detailed(after["detailed_logs"])
@@ -111,9 +114,9 @@ class Controller:
             self.agent.set_mic_enabled(on)
 
 
-def send_diagnostics() -> int:
+def send_diagnostics(include_conversation: bool) -> int:
     try:
-        report_id = diag.upload(diag.collect())
+        report_id = diag.upload(diag.collect(include_conversation))
     except RuntimeError as e:
         print(e, file=sys.stderr)
         return 1
@@ -127,11 +130,16 @@ def main() -> int:
     parser.add_argument("--debug", action="store_true", help="detailed logs for this run")
     parser.add_argument("--send-diagnostics", action="store_true",
                         help="upload logs and system info (no conversations, no API key) and exit")
+    parser.add_argument("--include-conversation", action="store_true",
+                        help="with --send-diagnostics: also send the recorded conversation, "
+                             "if recording is on")
     opts, qt_args = parser.parse_known_args()
 
-    logs.setup(detailed=opts.debug or config.load_settings()["detailed_logs"])
+    settings = config.load_settings()
+    logs.setup(detailed=opts.debug or settings["detailed_logs"])
     if opts.send_diagnostics:
-        return send_diagnostics()
+        return send_diagnostics(opts.include_conversation)
+    transcript.set_enabled(settings["record_conversation"])
     logs.route_qt_messages()
     # Let Ctrl+C in the terminal quit cleanly: Python only sees signals between Qt events.
     signal.signal(signal.SIGINT, lambda *_: QApplication.quit())
