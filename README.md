@@ -51,8 +51,9 @@ what is said, and keys are redacted. Logs live in kai's config folder under `log
 
 For harder problems you can turn on **Settings → Record conversations for diagnostics**.
 kai then saves what you and kai say and every action it takes in `logs/conversation.log`,
-on your computer only. It is sent only if you tick **Include the recorded conversation**
-in the diagnostics window (or pass `--include-conversation` with `--send-diagnostics`).
+on your computer only. When you send diagnostics, **Include the recorded conversation** is
+ticked if a recording exists; untick it to leave it out (from the terminal, pass
+`--include-conversation` with `--send-diagnostics`).
 Turning the option off deletes the recording. To record a single run without changing
 Settings, start kai with `kai --record`.
 

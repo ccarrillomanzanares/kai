@@ -77,7 +77,14 @@ def _log_tail() -> str:
 
 
 def has_conversation() -> bool:
-    return transcript.path().exists()
+    return transcript.path().exists() or transcript.path().with_name(
+        transcript.path().name + ".old").exists()
+
+
+def _recording_status(included: bool) -> dict:
+    files = [transcript.path(), transcript.path().with_name(transcript.path().name + ".old")]
+    return {"recording": transcript.enabled(), "included": included,
+            "bytes_on_disk": sum(p.stat().st_size for p in files if p.exists())}
 
 
 def collect(include_conversation: bool = False) -> dict:
@@ -97,7 +104,9 @@ def collect(include_conversation: bool = False) -> dict:
         "api_key": _api_key_status(),
         "log": _log_tail(),
     }
-    if include_conversation and has_conversation():
+    included = include_conversation and has_conversation()
+    report["conversation_status"] = _recording_status(included)  # sizes only, no content
+    if included:
         report["conversation"] = transcript.read_tail()
     return report
 

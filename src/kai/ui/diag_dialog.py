@@ -21,8 +21,8 @@ from kai import diag
 INTRO = (
     "Send a diagnostics report to help fix problems. It includes kai's recent "
     "logs, versions, your OS and audio devices.<br><br>"
-    "<b>It never includes your API key, and includes your conversation only if you "
-    "tick it below.</b>"
+    "<b>It never includes your API key. Your recorded conversation, if any, is "
+    "included only while the box below is ticked.</b>"
 )
 
 
@@ -45,19 +45,23 @@ class DiagDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Send diagnostics")
         self.setMinimumWidth(460)
-        self._report = diag.collect()
+        # Recording is opt-in for diagnostics, so a recording present is meant to be sent:
+        # include it by default, and let the user untick it.
+        has_conversation = diag.has_conversation()
+        self._report = diag.collect(include_conversation=has_conversation)
         self._uploader: _Uploader | None = None
 
         self.include = QCheckBox("Include the recorded conversation")
         self.include.setToolTip("What you and kai said, and kai's actions. "
                                 "Use \"Show report\" to read it before sending.")
-        self.include.setVisible(diag.has_conversation())
+        self.include.setChecked(has_conversation)
         self.include.toggled.connect(self._toggle_conversation)
 
         self.message = QLabel(INTRO, wordWrap=True)
         self.message.setTextInteractionFlags(Qt.TextSelectableByMouse)
 
-        self.details = QPlainTextEdit(json.dumps(self._report, indent=2), readOnly=True)
+        self.details = QPlainTextEdit(json.dumps(self._report, indent=2, ensure_ascii=False),
+                                      readOnly=True)
         self.details.setMinimumHeight(260)
         self.details.hide()
 
@@ -81,6 +85,7 @@ class DiagDialog(QDialog):
         layout.addWidget(QLabel("Send diagnostics", objectName="title"))
         layout.addWidget(self.message)
         layout.addWidget(self.include)
+        self.include.setVisible(has_conversation)  # after it has a parent: no stray window
         layout.addWidget(self.details)
         layout.addLayout(buttons)
 
