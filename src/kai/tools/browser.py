@@ -13,6 +13,7 @@ runs on one dedicated worker thread.
 from __future__ import annotations
 
 import logging
+import os
 import re
 import subprocess
 import sys
@@ -85,10 +86,30 @@ def _channels() -> list[str | None]:
     return ["chrome", "msedge", None]  # None = Playwright's bundled Chromium
 
 
+def _use_own_browser_dir() -> None:
+    """In the packaged app keep Playwright's Chromium in a per-user cache folder.
+
+    Frozen, Playwright would otherwise put it inside the install folder, which may
+    not be writable and is wiped by updates.
+    """
+    if not getattr(sys, "frozen", False) or "PLAYWRIGHT_BROWSERS_PATH" in os.environ:
+        return
+    if os.name == "nt":
+        base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
+    else:
+        base = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
+    os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(base / "kai" / "browsers")
+
+
 def _install_chromium() -> None:
+    """Download Playwright's Chromium with its bundled driver (no Python needed)."""
+    from playwright._impl._driver import compute_driver_executable, get_driver_env
+
     log.info("Downloading Chromium for kai's browser")
-    subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"],
-                   check=True, capture_output=True, timeout=600)
+    node, cli = compute_driver_executable()
+    kwargs = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    subprocess.run([node, cli, "install", "chromium"], env=get_driver_env(),
+                   check=True, capture_output=True, timeout=600, **kwargs)
 
 
 def _launch():
@@ -96,6 +117,7 @@ def _launch():
     from playwright.sync_api import Error, sync_playwright
 
     if _pw is None:
+        _use_own_browser_dir()
         _pw = sync_playwright().start()
     profile = config.config_dir() / "browser"
     errors = []

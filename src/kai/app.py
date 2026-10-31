@@ -147,10 +147,15 @@ def main() -> int:
                              "computer until you send it)")
     parser.add_argument("--include-conversation", action="store_true",
                         help="with --send-diagnostics: also send the recorded conversation")
+    parser.add_argument("--self-test", action="store_true", help=argparse.SUPPRESS)
     opts, qt_args = parser.parse_known_args()
 
     settings = config.load_settings()
     logs.setup(detailed=opts.debug or settings["detailed_logs"])
+    if opts.self_test:
+        from kai import selftest
+
+        return selftest.run()
     if opts.send_diagnostics:
         return send_diagnostics(opts.include_conversation)
     if opts.include_conversation and not opts.record:

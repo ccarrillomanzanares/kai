@@ -48,16 +48,21 @@ def set_detailed(detailed: bool) -> None:
 def setup(detailed: bool = False) -> None:
     formatter = _RedactingFormatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
     file_handler = RotatingFileHandler(log_file(), maxBytes=1_000_000, backupCount=2, encoding="utf-8")
-    console = logging.StreamHandler()
-    for h in (file_handler, console):
+    handlers = [file_handler]
+    console = None
+    if sys.stderr is not None:  # the packaged Windows app has no console
+        console = logging.StreamHandler()
+        handlers.append(console)
+    for h in handlers:
         h.setFormatter(formatter)
-    logging.basicConfig(level=logging.INFO, handlers=[file_handler, console], force=True)
+    logging.basicConfig(level=logging.INFO, handlers=handlers, force=True)
     # Third-party libraries can log request bodies at DEBUG; keep them quiet.
     for name in ("httpx", "httpcore", "websockets", "google_genai", "comtypes"):
         logging.getLogger(name).setLevel(logging.WARNING)
 
     logging.getLogger().handlers[0].setLevel(logging.DEBUG)
-    console.setLevel(logging.INFO)  # the terminal stays readable; details go to the file
+    if console:
+        console.setLevel(logging.INFO)  # the terminal stays readable; details go to the file
     set_detailed(detailed)
 
     def excepthook(exc_type, exc, tb):

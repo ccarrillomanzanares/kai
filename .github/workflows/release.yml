@@ -1,0 +1,101 @@
+# Build the Windows installer and the Linux AppImage.
+# Pushing a tag vX.Y.Z publishes them as a GitHub release; running the workflow
+# by hand ("Run workflow") only builds them and keeps them as workflow artifacts.
+name: Build installers
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Version
+        id: version
+        shell: bash
+        run: |
+          v=$(python -c "import re;print(re.search(r'__version__ = \"(.+)\"', open('src/kai/__init__.py').read())[1])")
+          if [[ "$GITHUB_REF_TYPE" == tag && "$GITHUB_REF_NAME" != "v$v" ]]; then
+            echo "Tag $GITHUB_REF_NAME does not match kai version $v"; exit 1
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - name: Install dependencies
+        run: pip install . pyinstaller
+      - name: Build
+        run: |
+          python packaging/make_icons.py build/icons
+          pyinstaller --noconfirm packaging/kai.spec
+      - name: Self-test
+        shell: pwsh
+        run: |
+          $p = Start-Process dist\kai\kai.exe -ArgumentList "--self-test" -Wait -PassThru
+          Get-Content "$env:APPDATA\kai\logs\selftest.txt"
+          exit $p.ExitCode
+      - name: Installer
+        run: |
+          choco install innosetup -y --no-progress
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DAppVersion=${{ steps.version.outputs.version }} packaging\windows\kai.iss
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/kai-*-setup.exe
+
+  linux:
+    # The oldest supported Ubuntu, so the AppImage runs on older distributions too.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: System libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libportaudio2 gir1.2-atspi-2.0 libgirepository1.0-dev libcairo2-dev pkg-config \
+            xvfb libegl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 \
+            libxcb-shape0 libxcb-randr0 libxcb-render-util0 libxcb-image0 libxcb-xinerama0 \
+            libfuse2
+      - name: Install dependencies
+        # PyGObject 3.51+ needs a newer GLib than Ubuntu 22.04 has.
+        run: pip install . pyinstaller "PyGObject<3.51"
+      - name: Build
+        run: |
+          python packaging/make_icons.py build/icons
+          pyinstaller --noconfirm packaging/kai.spec
+      - name: Self-test
+        run: xvfb-run -a dist/kai/kai --self-test
+      - name: AppImage
+        run: |
+          v=$(python -c "import re;print(re.search(r'__version__ = \"(.+)\"', open('src/kai/__init__.py').read())[1])")
+          packaging/linux/build-appimage.sh "$v"
+          xvfb-run -a "dist/kai-$v-x86_64.AppImage" --self-test
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: dist/kai-*.AppImage
+
+  release:
+    if: github.ref_type == 'tag'
+    needs: [windows, linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: out/*
+          generate_release_notes: true

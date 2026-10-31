@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=kai
+Comment=Voice assistant for your computer
+Exec=kai
+Icon=kai
+Categories=Utility;
+Terminal=false
+X-AppImage-Version=@VERSION@
