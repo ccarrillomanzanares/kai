@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
 import psutil
 
 TIMEOUT = 60
+BACKGROUND_WAIT = 4  # seconds to catch a program that fails right away
 MAX_OUTPUT = 6000
 
 if sys.platform == "win32":
@@ -35,15 +37,30 @@ def _trim(text: str) -> str:
     return text[: MAX_OUTPUT // 2] + "\n…[output truncated]…\n" + text[-MAX_OUTPUT // 2 :]
 
 
-def run_command(command: str, reason: str = "") -> dict:
+def run_command(command: str, reason: str = "", background: bool = False) -> dict:
+    """Run a command; one still going when the wait ends is left running, not killed."""
     kwargs = {"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}
-    try:
-        proc = subprocess.run(_shell_cmd(command), capture_output=True, text=True,
-                              encoding="utf-8", errors="replace", timeout=TIMEOUT,
-                              stdin=subprocess.DEVNULL, cwd=Path.home(), **kwargs)
-    except subprocess.TimeoutExpired:
-        return {"exit_code": None, "error": f"Timed out after {TIMEOUT} s"}
-    return {"exit_code": proc.returncode, "stdout": _trim(proc.stdout), "stderr": _trim(proc.stderr)}
+    wait = BACKGROUND_WAIT if background else TIMEOUT
+    # Files rather than pipes: a program left running must never block on a full pipe.
+    out = tempfile.TemporaryFile(mode="w+b")
+    err = tempfile.TemporaryFile(mode="w+b")
+    with out, err:
+        proc = subprocess.Popen(_shell_cmd(command), stdout=out, stderr=err,
+                                stdin=subprocess.DEVNULL, cwd=Path.home(), **kwargs)
+        try:
+            code = proc.wait(timeout=wait)
+        except subprocess.TimeoutExpired:
+            code = None
+
+        def read(f) -> str:
+            f.seek(0)
+            return _trim(f.read().decode("utf-8", errors="replace"))
+
+        result = {"exit_code": code, "stdout": read(out), "stderr": read(err)}
+    if code is None:
+        result["note"] = (f"Still running after {wait} s (process {proc.pid}); it was left "
+                          "running. Output so far is above.")
+    return result
 
 
 def list_processes(sort_by: str = "memory", limit: int = 15) -> list[dict]:

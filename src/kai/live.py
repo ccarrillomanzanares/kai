@@ -430,9 +430,20 @@ class LiveAgent(QObject):
                 if _is_key_problem(e.code, detail):
                     self.fatal_error.emit(detail or "Google rejected the API key.")
                     return
-                if "already exists" in detail.lower():
-                    # Seen after long idle (e.g. a muted mic): resuming keeps the context, but
-                    # if the old session can't be resumed twice in a row, start a fresh one.
+                if self._handle and ("not found" in detail.lower()
+                                     or "expired" in detail.lower()):
+                    # The old session is gone (e.g. after a server error): start a fresh one.
+                    log.info("Session can't be resumed; starting a new one")
+                    self._handle = None
+                    stale_resumes = 0
+                    self.error.emit("Reconnected with a fresh conversation: kai lost "
+                                    "what was said before.")
+                    backoff = 1
+                    continue
+                if self._handle:
+                    # Resuming keeps the context, but if the old session fails twice in a
+                    # row within a minute (e.g. "already exists" after a long idle), start a
+                    # fresh one rather than retrying it forever.
                     lived = time.monotonic() - connected_at if connected_at else 0
                     stale_resumes = stale_resumes + 1 if lived < 60 else 1
                     if stale_resumes >= 2:

@@ -70,3 +70,8 @@ def test_only_key_errors_are_fatal():
     assert live._is_key_problem(403, "")
     assert not live._is_key_problem(1008, "Requested entity already exists")
     assert not live._is_key_problem(1011, "Internal error")
+
+
+def test_expired_session_is_not_a_key_problem():
+    from kai.live import _is_key_problem
+    assert not _is_key_problem(1008, "BidiGenerateContent session not found or expired")

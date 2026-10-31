@@ -252,12 +252,15 @@ TOOLS: dict[str, Tool] = {
              "Use it for anything the other tools can't do: settings, files, network, installed "
              "software, etc. The user sees the exact command and must approve it, so prefer "
              "one clear, safe command. Runs in the user's home folder, non-interactively (no sudo or "
-             "password prompts) with a 60 s timeout.",
+             "password prompts). It waits up to 60 s; a command still running then is left running. "
+             "To start something that keeps running (a game, an app, a server), set background "
+             "to true: you get its first seconds of output and the conversation goes on.",
              _params(["command", "reason"],
                      command=("string", f"The {shell.SHELL_NAME} command to run."),
-                     reason=("string", "Short explanation for the user, in their language.")),
+                     reason=("string", "Short explanation for the user, in their language."),
+                     background=("boolean", "Start it and return after a few seconds.")),
              shell.run_command, Risk.SENSITIVE,
-             confirm_text=lambda command, reason="": (reason or "Run a command", command)),
+             confirm_text=lambda command, reason="", background=False: (reason or "Run a command", command)),
         Tool("close_window",
              "Close an app window the normal way, like clicking its X (the app may ask to "
              "save). Use this to close programs; kill_process only if this fails.",
