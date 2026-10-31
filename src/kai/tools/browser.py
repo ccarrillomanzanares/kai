@@ -17,6 +17,8 @@ import re
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
+from pathlib import Path
 
 from kai import config
 
@@ -32,6 +34,8 @@ _pw = None
 _ctx = None
 _page = None
 _described: dict[int, str] = {}  # element number -> description from the last read
+_download_news: list[str] = []  # download events not yet reported to the model
+_saving: set[str] = set()  # downloads still running (they hold the browser thread)
 
 # Marks the visible interactive elements with data-kai="n" and describes them.
 _SNAPSHOT_JS = r"""
@@ -112,6 +116,8 @@ def _launch():
         raise RuntimeError("Could not start a browser. " + " | ".join(errors[-3:]))
     _ctx.set_default_timeout(TIMEOUT_MS)
     _ctx.on("page", _on_new_page)
+    for page in _ctx.pages:
+        page.on("download", _on_download)
     _ctx.on("close", _on_closed)
     _page = _ctx.pages[0] if _ctx.pages else _ctx.new_page()
 
@@ -119,6 +125,43 @@ def _launch():
 def _on_new_page(page) -> None:
     global _page
     _page = page  # links that open a new tab: follow them
+    page.on("download", _on_download)
+
+
+def downloads_dir() -> Path:
+    folder = Path.home() / "Downloads"
+    return folder if folder.is_dir() else Path.home()
+
+
+def _free_name(folder: Path, name: str) -> Path:
+    target = folder / name
+    stem, suffix, n = target.stem, target.suffix, 1
+    while target.exists():
+        n += 1
+        target = folder / f"{stem} ({n}){suffix}"
+    return target
+
+
+def _on_download(download) -> None:
+    """Playwright keeps downloads in a temporary folder: save them to Downloads."""
+    target = _free_name(downloads_dir(), download.suggested_filename or "download")
+    _download_news.append(f"Downloading {target.name} to {target.parent} (in progress).")
+    log.info("Download started: %s", target.name)
+    _saving.add(target.name)
+    _executor.submit(_save_download, download, target)  # runs after the current call
+
+
+def _save_download(download, target: Path) -> None:
+    try:
+        download.save_as(target)  # waits until the download has finished
+        size = target.stat().st_size / 1e6
+        _download_news.append(f"Download finished: {target} ({size:.1f} MB).")
+        log.info("Download saved: %s (%.1f MB)", target, size)
+    except Exception as e:
+        _download_news.append(f"Download of {target.name} failed: {e}")
+        log.warning("Download of %s failed: %s", target.name, e)
+    finally:
+        _saving.discard(target.name)
 
 
 def _on_closed(_ctx_) -> None:
@@ -183,11 +226,18 @@ def _snapshot(page, part: int = 1) -> str:
         position = "bottom of the page"
     else:
         position = f"scrolled {round(100 * info['scrollY'] / room)}% down"
-    lines = [f"Title: {page.title()}", f"URL: {page.url}",
+    page.wait_for_timeout(300)  # a click that downloads reports it a moment later
+    lines = [*_take_download_news(), f"Title: {page.title()}", f"URL: {page.url}",
              f"Elements in view ({position}; use their numbers):",
              *(info["elements"] or ["(none)"]),
              f"Page text, part {part} of {parts}:", chunk or "(no text)"]
     return "\n".join(lines)
+
+
+def _take_download_news() -> list[str]:
+    news = _download_news[:]
+    del _download_news[: len(news)]
+    return news
 
 
 def _await_navigation(page, before: str) -> None:
@@ -219,7 +269,15 @@ def _call(fn, *args):
 
 
 def _run(fn, *args):
-    return _executor.submit(_call, fn, *args).result(timeout=120)
+    if _saving:
+        raise RuntimeError(
+            f"kai's browser is busy downloading {', '.join(sorted(_saving))} to "
+            f"{downloads_dir()}. It can't do anything else until that finishes: tell the "
+            "user, and check the folder with list_directory later.")
+    try:
+        return _executor.submit(_call, fn, *args).result(timeout=120)
+    except FutureTimeout:
+        raise RuntimeError("kai's browser is not responding. Try again.") from None
 
 
 def _element(page, number: int):

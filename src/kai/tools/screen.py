@@ -19,6 +19,7 @@ JPEG_QUALITY = 70
 # Screen region (left, top, width, height) of the last screenshot, in pixels.
 _last_region: tuple[int, int, int, int] | None = None
 _last_jpeg: bytes = b""  # the last screenshot, for the opt-in debug recording
+_last_click: tuple[float, float, str] | None = None  # x, y and what it landed on
 
 
 def last_jpeg() -> bytes:
@@ -101,8 +102,18 @@ def click_point(px: int, py: int, button: str = "left", double: bool = False) ->
 def click(x: float, y: float, button: str = "left", double: bool = False) -> str:
     from kai.tools import uia
 
+    global _last_click
     px, py = _to_screen(x, y)
     hit = uia.describe_point(px, py)  # before clicking: the click may change the screen
+    previous, _last_click = _last_click, (x, y, hit)
+    if previous and abs(previous[0] - x) <= 15 and abs(previous[1] - y) <= 15 \
+            and previous[2] == hit:
+        _last_click = None  # a deliberate second try after this warning goes through
+        raise RuntimeError(
+            f"Not clicked: you just clicked about here ({previous[0]:g}, {previous[1]:g})"
+            + (f" and it landed on {hit}" if hit else "") + ". Repeating it won't help. "
+            "Look at the screenshot again and aim at the center of what you want, or try "
+            "another way (read_window, a keyboard shortcut), or ask the user.")
     click_point(px, py, button, double)
     kind = ("Double-clicked" if double else "Right-clicked" if button == "right" else "Clicked")
     landed = (f" It landed on: {hit}. If that's not what you meant, aim again." if hit else "")

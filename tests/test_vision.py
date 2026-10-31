@@ -128,3 +128,16 @@ def test_fill_field_refuses_buttons(monkeypatch):
     monkeypatch.setattr(uia, "_last", {15: uia.Element("button", "Añadir imágenes", (0, 0, 9, 9))})
     with pytest.raises(ValueError, match="not a text field"):
         uia.fill_field(15, "hola")
+
+
+def test_same_click_twice_is_refused_once(monkeypatch):
+    from kai.tools import screen, uia
+    monkeypatch.setattr(screen, "_last_region", (0, 0, 1000, 1000))
+    monkeypatch.setattr(screen, "_last_click", None)
+    monkeypatch.setattr(screen, "click_point", lambda *a, **k: None)
+    monkeypatch.setattr(uia, "describe_point", lambda px, py: "TitleBar")
+    assert screen.click(250, 20).startswith("Clicked")
+    with pytest.raises(RuntimeError, match="Repeating"):
+        screen.click(252, 22)
+    assert screen.click(250, 20).startswith("Clicked")  # deliberate retry goes through
+    assert screen.click(600, 500).startswith("Clicked")
