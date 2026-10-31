@@ -3,8 +3,8 @@
 Off by default. When the user turns it on in Settings, what the user and kai
 say and every tool call (arguments and a shortened result) go to a separate
 file next to the logs. It is only uploaded if the user ticks "Include the
-recorded conversation" when sending diagnostics. Turning recording off
-deletes the file. API keys are redacted like in the logs.
+recorded conversation" when sending diagnostics. Turning the option off in
+Settings deletes the file. API keys are redacted like in the logs.
 """
 
 from __future__ import annotations
@@ -33,14 +33,13 @@ def enabled() -> bool:
 
 
 def set_enabled(on: bool) -> None:
+    """Start or stop recording. Stopping keeps the file: see delete()."""
     global _enabled
     with _lock:
         if _enabled and not on:
             _pending["user"].clear()
             _pending["kai"].clear()
         _enabled = on
-    if not on:
-        delete()
 
 
 def delete() -> None:

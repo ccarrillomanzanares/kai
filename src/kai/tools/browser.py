@@ -198,8 +198,28 @@ def _await_navigation(page, before: str) -> None:
         pass  # nothing navigated: the action changed the page in place
 
 
+def _call(fn, *args):
+    """Run on the browser thread; if the user closed the window, reopen it and retry."""
+    global _ctx, _page
+    from playwright.sync_api import Error
+
+    try:
+        return fn(*args)
+    except Error as e:
+        if "closed" not in str(e).lower() and type(e).__name__ != "TargetClosedError":
+            raise
+        log.info("Browser window was closed; reopening it")
+        try:
+            if _ctx is not None:
+                _ctx.close()
+        except Exception:
+            pass
+        _ctx = _page = None
+        return fn(*args)
+
+
 def _run(fn, *args):
-    return _executor.submit(fn, *args).result(timeout=120)
+    return _executor.submit(_call, fn, *args).result(timeout=120)
 
 
 def _element(page, number: int):
@@ -244,7 +264,13 @@ def browser_click(element: int) -> str:
     def click():
         page = _current()
         before = page.url
-        _element(page, element).click(timeout=ACTION_MS)
+        target = _element(page, element)
+        try:
+            target.click(timeout=ACTION_MS)
+        except Exception as e:
+            if "Timeout" not in type(e).__name__:
+                raise
+            target.click(force=True, timeout=ACTION_MS)  # something overlays it: click anyway
         _await_navigation(page, before)
         return _snapshot(_current())  # the click may have opened a new tab
     return _run(click)

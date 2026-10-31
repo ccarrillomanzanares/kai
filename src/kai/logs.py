@@ -53,7 +53,7 @@ def setup(detailed: bool = False) -> None:
         h.setFormatter(formatter)
     logging.basicConfig(level=logging.INFO, handlers=[file_handler, console], force=True)
     # Third-party libraries can log request bodies at DEBUG; keep them quiet.
-    for name in ("httpx", "httpcore", "websockets", "google_genai"):
+    for name in ("httpx", "httpcore", "websockets", "google_genai", "comtypes"):
         logging.getLogger(name).setLevel(logging.WARNING)
 
     logging.getLogger().handlers[0].setLevel(logging.DEBUG)

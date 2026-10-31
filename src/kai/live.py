@@ -26,6 +26,7 @@ from kai.config import MODEL
 log = logging.getLogger(__name__)
 
 LONG_RUN = 8  # tool calls without speaking before kai is nudged to check in with the user
+MAX_SILENT_RUN = 16  # ...and before further tool calls are refused until it speaks
 
 SYSTEM_PROMPT = """\
 You are kai, a calm and concise voice assistant that helps the user manage their computer.
@@ -42,10 +43,15 @@ You are kai, a calm and concise voice assistant that helps the user manage their
   They show the page text and numbered elements, so you know what is there. For a search,
   open the search URL directly. Use open_url only when the user wants a page opened in
   their usual browser for themselves.
-- Apps on the desktop: open them with open_app, then see before acting: read_window lists
-  the window's buttons, fields and menus to use with click_element; if it finds little,
-  use look_at_screen and click with coordinates from the image. Type with type_text and
-  shortcuts with press_keys, passing the window title (list_windows shows them).
+  Inside your browser ALWAYS act through the element numbers. Never use look_at_screen,
+  click, scroll, press_keys or type_text on it: they are slower and miss. If an element
+  isn't listed, scroll or read the next part; use browser_screenshot only to look at
+  images.
+- Apps on the desktop: open them with open_app, then call read_window and act with
+  click_element on the numbers it lists; to fill a field, click_element it and then
+  type_text. Only if read_window finds nothing useful, use look_at_screen and click with
+  coordinates from the image. Shortcuts go through press_keys, passing the window title
+  (list_windows shows them).
   After acting, check the result (read again or take a new screenshot) instead of assuming.
   If list_windows doesn't show the window you need, try read_window or look_at_screen
   before telling the user you can't find it.
@@ -424,16 +430,17 @@ class LiveAgent(QObject):
         wake = asyncio.create_task(self._reconnect_now.wait())
         try:
             done, _ = await asyncio.wait({serve, wake}, return_when=asyncio.FIRST_COMPLETED)
+        except asyncio.CancelledError:  # kai is quitting
+            serve.cancel()
+            await asyncio.gather(serve, return_exceptions=True)
+            raise
         finally:
             wake.cancel()
         if serve in done:
             serve.result()  # re-raise connection errors
             return True  # GoAway: reconnect right away
         serve.cancel()
-        try:
-            await serve
-        except asyncio.CancelledError:
-            pass
+        await asyncio.gather(serve, return_exceptions=True)  # the watchdog's reconnect wins
         return True
 
     async def _serve(self, s) -> None:
@@ -539,6 +546,15 @@ class LiveAgent(QObject):
         responses = []
         for fc in tool_call.function_calls or []:
             args = dict(fc.args or {})
+            if self._silent_tools >= MAX_SILENT_RUN:
+                log.info("Tool %s refused: %d tool calls without speaking", fc.name,
+                         self._silent_tools)
+                result = {"error": "Stopped: you have taken too many actions without talking. "
+                                   "Tell the user what you see and what is blocking you, and "
+                                   "ask how to go on. No more tools until you have spoken."}
+                transcript.tool(fc.name, args, result)
+                responses.append(types.FunctionResponse(id=fc.id, name=fc.name, response=result))
+                continue
             self.tool_used.emit(fc.name, args)
             started = time.monotonic()
             log.debug("Tool %s started", fc.name)
@@ -550,7 +566,7 @@ class LiveAgent(QObject):
                      time.monotonic() - started)
             image = result.pop(tools.IMAGE_KEY, None)
             self._silent_tools += 1
-            if self._silent_tools in (LONG_RUN, 2 * LONG_RUN):
+            if self._silent_tools == LONG_RUN:
                 log.info("%d tool calls in a row without speaking", self._silent_tools)
                 result["note"] = (f"You have used {self._silent_tools} tools in a row without "
                                   "speaking. Briefly tell the user what you are doing or what "

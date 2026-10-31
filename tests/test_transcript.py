@@ -35,4 +35,6 @@ def test_records_turns_and_tools(monkeypatch, tmp_path):
         assert "open the news" in diag.collect(include_conversation=True)["conversation"]
     finally:
         transcript.set_enabled(False)
-    assert not transcript.path().exists()  # turning it off deletes the recording
+    assert transcript.path().exists()  # stopping keeps it, e.g. to send it later
+    transcript.delete()
+    assert not transcript.path().exists()

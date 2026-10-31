@@ -36,3 +36,30 @@ def test_watchdog_leaves_quiet_sessions_alone():
         return agent._reconnect_now.is_set()
 
     assert asyncio.run(scenario()) is False
+
+
+def test_long_silent_tool_runs_are_nudged_then_stopped(monkeypatch):
+    from google.genai import types
+
+    agent = live.LiveAgent("key", full_duplex=True)
+    calls, sent = [], []
+    monkeypatch.setattr(live.tools, "call",
+                        lambda name, args, *a: calls.append(name) or {"result": "ok"})
+
+    class Session:
+        async def send_tool_response(self, function_responses):
+            sent.extend(function_responses)
+
+    def tool_call():
+        return types.LiveServerToolCall(function_calls=[
+            types.FunctionCall(id="1", name="get_datetime", args={})])
+
+    async def scenario():
+        for _ in range(live.MAX_SILENT_RUN + 2):
+            await agent._handle_tool_call(Session(), tool_call())
+
+    asyncio.run(scenario())
+    assert len(calls) == live.MAX_SILENT_RUN  # the rest were refused without running
+    assert "note" in sent[live.LONG_RUN - 1].response
+    assert "Stopped" in sent[-1].response["error"]
+    agent._silent_tools = 0  # speaking resets the count

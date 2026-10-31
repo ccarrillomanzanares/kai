@@ -23,9 +23,10 @@ from kai.ui.settings_dialog import SettingsDialog
 
 
 class Controller:
-    def __init__(self, window: MainWindow):
+    def __init__(self, window: MainWindow, record_run: bool = False):
         self.window = window
         self.agent = None
+        self.record_run = record_run  # --record: keep recording whatever Settings say
         window.text_submitted.connect(self._send_text)
         window.mic_toggled.connect(self._toggle_mic)
         window.change_key_requested.connect(self.change_key)
@@ -77,7 +78,9 @@ class Controller:
         if dialog.exec() != QDialog.Accepted:
             return
         after = config.load_settings()
-        transcript.set_enabled(after["record_conversation"])
+        transcript.set_enabled(after["record_conversation"] or self.record_run)
+        if before["record_conversation"] and not after["record_conversation"]:
+            transcript.delete()
         if not self.agent:
             return
         changed = sorted(k for k in after if after[k] != before.get(k))
@@ -131,16 +134,24 @@ def main() -> int:
     parser.add_argument("--debug", action="store_true", help="detailed logs for this run")
     parser.add_argument("--send-diagnostics", action="store_true",
                         help="upload logs and system info (no conversations, no API key) and exit")
+    parser.add_argument("--record", action="store_true",
+                        help="record this run's conversation for diagnostics (stays on this "
+                             "computer until you send it)")
     parser.add_argument("--include-conversation", action="store_true",
-                        help="with --send-diagnostics: also send the recorded conversation, "
-                             "if recording is on")
+                        help="with --send-diagnostics: also send the recorded conversation")
     opts, qt_args = parser.parse_known_args()
 
     settings = config.load_settings()
     logs.setup(detailed=opts.debug or settings["detailed_logs"])
     if opts.send_diagnostics:
         return send_diagnostics(opts.include_conversation)
-    transcript.set_enabled(settings["record_conversation"])
+    if opts.include_conversation and not opts.record:
+        print("--include-conversation is for --send-diagnostics. Recording this run's "
+              "conversation, as with --record.", file=sys.stderr)
+        opts.record = True
+    if opts.record:
+        logging.getLogger("kai").info("Recording the conversation for this run (--record)")
+    transcript.set_enabled(settings["record_conversation"] or opts.record)
     logs.route_qt_messages()
     # Let Ctrl+C in the terminal quit cleanly: Python only sees signals between Qt events.
     signal.signal(signal.SIGINT, lambda *_: QApplication.quit())
@@ -157,7 +168,7 @@ def main() -> int:
     heartbeat.start()
 
     window = MainWindow()
-    controller = Controller(window)
+    controller = Controller(window, record_run=opts.record)
     window.quit_requested.connect(app.quit)
     app.aboutToQuit.connect(controller.stop_agent)
     app.aboutToQuit.connect(browser.shutdown)  # close kai's browser window too
