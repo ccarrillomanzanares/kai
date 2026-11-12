@@ -69,11 +69,13 @@ jobs:
         # PyGObject 3.51+ needs a newer GLib than Ubuntu 22.04 has.
         run: pip install . pyinstaller "PyGObject<3.51"
       - name: Build
+        # Under a display: pynput and pywinctl cannot be imported without one, and
+        # PyInstaller imports them to find their submodules.
         run: |
           python packaging/make_icons.py build/icons
-          pyinstaller --noconfirm packaging/kai.spec
+          xvfb-run -a pyinstaller --noconfirm packaging/kai.spec
       - name: Self-test
-        run: xvfb-run -a dist/kai/kai --self-test
+        run: xvfb-run -a dist/kai/kai --self-test || { cat ~/.config/kai/logs/selftest.txt; exit 1; }
       - name: AppImage
         run: |
           v=$(python -c "import re;print(re.search(r'__version__ = \"(.+)\"', open('src/kai/__init__.py').read())[1])")
