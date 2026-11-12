@@ -37,7 +37,10 @@ def _check_accessibility() -> str:
         return "UI Automation"
     from kai.tools import uia
 
-    return f"AT-SPI {uia._atspi().get_version()}"
+    atspi = uia._atspi()
+    atspi.get_desktop  # what kai uses; get_version only exists in newer AT-SPI
+    version = getattr(atspi, "get_version", None)
+    return f"AT-SPI {version() if version else '(older, no version call)'}"
 
 
 def _check_input() -> str:
