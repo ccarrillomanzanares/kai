@@ -17,7 +17,8 @@ pip install -e ".[dev]"
 kai
 ```
 
-On Linux, audio needs PortAudio: `sudo apt install libportaudio2`. Use an X11 session:
+On Linux, audio needs PortAudio and window management needs `xrandr`:
+`sudo apt install libportaudio2 x11-xserver-utils`. Use an X11 session:
 Wayland blocks screenshots and mouse/keyboard control. To let kai read app windows,
 install AT-SPI and give the virtual environment access to it:
 

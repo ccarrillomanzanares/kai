@@ -48,8 +48,9 @@ def _check_input() -> str:
 
 
 def _check_windows() -> str:
-    import pywinctl  # noqa: F401
+    from kai.tools import desktop
 
+    desktop._pywinctl()
     return "ok"
 
 

@@ -42,8 +42,19 @@ def _is_real(w) -> bool:
         return False
 
 
+def _pywinctl():
+    try:
+        import pywinctl
+    except SystemExit:
+        # pymonctl exits the whole program when it cannot run xrandr (Linux).
+        raise RuntimeError("Managing windows needs the xrandr command and an X11 "
+                           "session. Install it (x11-xserver-utils on Debian and "
+                           "Ubuntu) and restart kai.") from None
+    return pywinctl
+
+
 def _windows():
-    import pywinctl
+    pywinctl = _pywinctl()
 
     own = {"kai", "kai needs your permission", "Send diagnostics", "Settings"}
     return [w for w in pywinctl.getAllWindows() if w.title not in own and _is_real(w)]
@@ -91,9 +102,7 @@ def _ensure_target(window: str | None) -> str:
     """Focus the requested window, or check the active one isn't kai itself."""
     if window:
         return focus_window(window).removeprefix("Focused ")
-    import pywinctl
-
-    active = pywinctl.getActiveWindow()
+    active = _pywinctl().getActiveWindow()
     if active is None or active.title in ("kai", "kai needs your permission"):
         raise RuntimeError("kai's own window is focused. Pass the target window's title.")
     return f"'{active.title}'"
