@@ -2,8 +2,9 @@
 
 What is sent: kai and library versions, OS details, audio devices, whether an
 API key is configured (never the key), and the tail of kai's log file.
-Never sent: API keys. Conversations and tool arguments are only included when
-the user turned on conversation recording and ticks it for this report.
+Never sent: API keys. The conversation and tool arguments are only included
+while the user leaves "Include the conversation" ticked for this report: this
+run's conversation, or the whole recording when recording is turned on.
 """
 
 from __future__ import annotations
@@ -76,18 +77,27 @@ def _log_tail() -> str:
     return logs.redact(data.decode("utf-8", errors="replace"))
 
 
-def has_conversation() -> bool:
-    return transcript.path().exists() or transcript.path().with_name(
-        transcript.path().name + ".old").exists()
+def _recording_files() -> list:
+    return [p for p in (transcript.path(), transcript.path().with_name(
+        transcript.path().name + ".old")) if p.exists()]
 
 
-def _recording_status(included: bool) -> dict:
-    files = [transcript.path(), transcript.path().with_name(transcript.path().name + ".old")]
-    return {"recording": transcript.enabled(), "included": included,
-            "bytes_on_disk": sum(p.stat().st_size for p in files if p.exists())}
+def _use_recording(stored: bool) -> bool:
+    """Whether the conversation comes from the recording on disk, not from this run.
+
+    A recording left on disk while recording is off is from some earlier run: it is
+    only sent when asked for from the terminal (stored), where there is no run.
+    """
+    if not _recording_files():
+        return False
+    return transcript.enabled() or (stored and not transcript.has_session())
 
 
-def collect(include_conversation: bool = False) -> dict:
+def has_conversation(stored: bool = False) -> bool:
+    return transcript.has_session() or _use_recording(stored)
+
+
+def collect(include_conversation: bool = False, stored: bool = False) -> dict:
     report = {
         "kai_version": __version__,
         "system": {
@@ -104,11 +114,19 @@ def collect(include_conversation: bool = False) -> dict:
         "api_key": _api_key_status(),
         "log": _log_tail(),
     }
-    included = include_conversation and has_conversation()
-    report["conversation_status"] = _recording_status(included)  # sizes only, no content
-    if included:
+    included = include_conversation and has_conversation(stored)
+    recording = _use_recording(stored)
+    report["conversation_status"] = {  # no content
+        "recording": transcript.enabled(), "included": included,
+        "source": ("recording" if recording else "this run") if included else None,
+        "bytes_on_disk": sum(p.stat().st_size for p in _recording_files()),
+    }
+    if included and recording:
         report["conversation"] = transcript.read_tail()
         report["screenshots"] = transcript.read_shots()
+    elif included:
+        report["conversation"] = transcript.read_session()
+        report["screenshots"] = transcript.read_session_shots()
     return report
 
 

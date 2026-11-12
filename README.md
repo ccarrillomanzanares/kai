@@ -53,16 +53,19 @@ You can also set the key with the `GEMINI_API_KEY` environment variable.
 If something goes wrong, use **⋯ → Send diagnostics…** (or `kai --send-diagnostics`).
 It uploads kai's recent logs, versions, OS and audio devices to `ccmai.org/kai-diag`
 and gives you a short reference. You can review the full report before sending.
-It never includes your API key, and by default no conversations: kai does not log
-what is said, and keys are redacted. Logs live in kai's config folder under `logs/`.
+It never includes your API key, and keys are redacted. Logs live in kai's config
+folder under `logs/`; kai does not log what is said.
 
-For harder problems you can turn on **Settings → Record conversations for diagnostics**.
-kai then saves what you and kai say and every action it takes in `logs/conversation.log`,
-plus its last 12 screenshots with its clicks marked, on your computer only. When you send diagnostics, **Include the recorded conversation** is
-ticked if a recording exists; untick it to leave it out (from the terminal, pass
-`--include-conversation` with `--send-diagnostics`).
-Turning the option off deletes the recording. To record a single run without changing
-Settings, start kai with `kai --record`.
+The report also carries the conversation since kai started (what you and kai said or
+typed, every action it took and its last 12 screenshots with its clicks marked) while
+**Include the conversation** is ticked; untick it to leave it out. kai keeps that
+conversation in memory only, and it is gone when kai closes.
+
+To also keep earlier runs, turn on **Settings → Record conversations for diagnostics**.
+kai then saves the same things in `logs/conversation.log` on your computer, and the
+report carries that recording instead. Turning the option off deletes the recording.
+To record a single run without changing Settings, start kai with `kai --record`, and
+send it later from the terminal with `kai --send-diagnostics --include-conversation`.
 
 ## Project layout
 

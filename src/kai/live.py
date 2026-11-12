@@ -222,6 +222,8 @@ class LiveAgent(QObject):
                 self._session.send_realtime_input(text=text), self._loop
             )
             transcript.typed(text)
+            self._turn.user_chars += len(text)
+            self._user_spoke_at = time.monotonic()
 
     def set_mic_enabled(self, enabled: bool) -> None:
         if enabled != self._mic_enabled:
@@ -624,11 +626,10 @@ class LiveAgent(QObject):
                                   "speaking. Briefly tell the user what you are doing or what "
                                   "is blocking you, and ask before going on if it isn't working.")
             transcript.tool(fc.name, args, result)
-            if transcript.enabled():
-                if fc.name == "click" and "error" not in result:
-                    transcript.shot(screen.last_jpeg(), "click", (args.get("x", 0), args.get("y", 0)))
-                elif image:
-                    transcript.shot(image, fc.name)
+            if fc.name == "click" and "error" not in result:
+                transcript.shot(screen.last_jpeg(), "click", (args.get("x", 0), args.get("y", 0)))
+            elif image:
+                transcript.shot(image, fc.name)
             parts = None
             if image:
                 parts = [types.FunctionResponsePart(inline_data=types.FunctionResponseBlob(

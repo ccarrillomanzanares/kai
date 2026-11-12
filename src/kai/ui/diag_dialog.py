@@ -21,7 +21,7 @@ from kai import diag
 INTRO = (
     "Send a diagnostics report to help fix problems. It includes kai's recent "
     "logs, versions, your OS and audio devices.<br><br>"
-    "<b>It never includes your API key. Your recorded conversation, if any, is "
+    "<b>It never includes your API key. Your conversation with kai is "
     "included only while the box below is ticked.</b>"
 )
 
@@ -54,15 +54,15 @@ class DiagDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Send diagnostics")
         self.setMinimumWidth(460)
-        # Recording is opt-in for diagnostics, so a recording present is meant to be sent:
-        # include it by default, and let the user untick it.
+        # The conversation is what explains most problems: include it by default (this
+        # run's, or the whole recording when recording is on), and let the user untick it.
         has_conversation = diag.has_conversation()
         self._report = diag.collect(include_conversation=has_conversation)
         self._uploader: _Uploader | None = None
 
-        self.include = QCheckBox("Include the recorded conversation")
-        self.include.setToolTip("What you and kai said, kai's actions and its last "
-                                "screenshots. "
+        self.include = QCheckBox("Include the conversation")
+        self.include.setToolTip("What you and kai said since kai started, kai's actions "
+                                "and its last screenshots. "
                                 "Use \"Show report\" to read it before sending.")
         self.include.setChecked(has_conversation)
         self.include.toggled.connect(self._toggle_conversation)

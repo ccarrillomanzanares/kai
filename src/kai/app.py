@@ -128,7 +128,7 @@ class Controller:
 
 def send_diagnostics(include_conversation: bool) -> int:
     try:
-        report_id = diag.upload(diag.collect(include_conversation))
+        report_id = diag.upload(diag.collect(include_conversation, stored=True))
     except RuntimeError as e:
         print(e, file=sys.stderr)
         return 1
@@ -141,7 +141,7 @@ def main() -> int:
     parser.add_argument("--version", action="version", version=f"kai {__version__}")
     parser.add_argument("--debug", action="store_true", help="detailed logs for this run")
     parser.add_argument("--send-diagnostics", action="store_true",
-                        help="upload logs and system info (no conversations, no API key) and exit")
+                        help="upload logs and system info (no conversation, no API key) and exit")
     parser.add_argument("--record", action="store_true",
                         help="record this run's conversation for diagnostics (stays on this "
                              "computer until you send it)")

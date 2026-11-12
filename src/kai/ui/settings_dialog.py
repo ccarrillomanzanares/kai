@@ -131,8 +131,9 @@ class SettingsDialog(QDialog):
             self, "Record conversations",
             "kai will save what you and kai say, every action it takes (including what it "
             "types and the web addresses it opens) and its last screenshots, on this "
-            "computer.\n\n"
-            "It is only sent if you tick \"Include the recorded conversation\" when sending "
+            "computer, so diagnostics can include earlier runs and not only the current "
+            "one.\n\n"
+            "It is only sent while \"Include the conversation\" is ticked when sending "
             "diagnostics. Turning this option off deletes the recording.\n\n"
             "Turn on recording?",
         )
