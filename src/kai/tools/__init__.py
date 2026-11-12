@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import enum
 import logging
-import platform
 import re
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -89,7 +88,7 @@ def _params(required: list[str] | None = None, **props: tuple[str, str]) -> dict
     return schema
 
 
-OS_NAME = f"{platform.system()} {platform.release()}"
+OS_NAME = system.os_name()
 
 TOOLS: dict[str, Tool] = {
     t.name: t
@@ -240,7 +239,8 @@ TOOLS: dict[str, Tool] = {
              _params(), browser.browser_screenshot, Risk.READ),
         Tool("open_diagnostics",
              "Open kai's 'Send diagnostics' window so the user can review and send a report "
-             "with kai's logs and system info (no conversations, no API key). Use it when the "
+             "with kai's logs, system info and, while its box stays ticked, this conversation "
+             "(never the API key). Use it when the "
              "user reports a problem with kai or asks to send diagnostics. Nothing is sent "
              "until the user clicks Send.",
              _params(),

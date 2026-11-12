@@ -19,6 +19,7 @@ import urllib.request
 from importlib import metadata
 
 from kai import __version__, config, logs, transcript
+from kai.tools.system import os_name
 
 DIAG_URL = "https://ccmai.org/kai-diag/upload"
 MAX_LOG_BYTES = 400_000
@@ -102,6 +103,7 @@ def collect(include_conversation: bool = False, stored: bool = False) -> dict:
         "kai_version": __version__,
         "system": {
             "os": platform.system(),
+            "name": os_name(),
             "release": platform.release(),
             "version": platform.version(),
             "machine": platform.machine(),

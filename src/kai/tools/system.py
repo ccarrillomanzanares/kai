@@ -11,6 +11,19 @@ from urllib.parse import urlparse
 import psutil
 
 
+def os_name() -> str:
+    """The OS as the user knows it, e.g. 'Windows 11'."""
+    system, release = platform.system(), platform.release()
+    if system == "Windows" and release == "10":
+        # Windows 11 still calls itself 10.0: only the build number tells them apart.
+        try:
+            if int(platform.version().split(".")[2]) >= 22000:
+                release = "11"
+        except (IndexError, ValueError):
+            pass
+    return f"{system} {release}"
+
+
 def get_datetime() -> dict:
     now = datetime.datetime.now().astimezone()
     return {
@@ -24,7 +37,7 @@ def get_system_info() -> dict:
     mem = psutil.virtual_memory()
     disk = psutil.disk_usage(str(Path.home().anchor or "/"))
     info = {
-        "os": f"{platform.system()} {platform.release()}",
+        "os": os_name(),
         "machine": platform.machine(),
         "cpu_count": psutil.cpu_count(),
         "cpu_percent": psutil.cpu_percent(interval=0.3),

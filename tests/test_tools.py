@@ -148,3 +148,12 @@ def test_permission_levels():
     # trusted: only destructive commands
     assert not need(T["run_command"], cmd, P.TRUSTED) and need(T["run_command"], rm, P.TRUSTED)
     assert not need(T["kill_process"], {"pid": 1}, P.TRUSTED)
+
+
+def test_os_name_tells_windows_11_from_10(monkeypatch):
+    monkeypatch.setattr(system.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(system.platform, "release", lambda: "10")
+    monkeypatch.setattr(system.platform, "version", lambda: "10.0.26300")
+    assert system.os_name() == "Windows 11"
+    monkeypatch.setattr(system.platform, "version", lambda: "10.0.19045")
+    assert system.os_name() == "Windows 10"
