@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# Bench stand-in for an interactive program: a folder-trust menu whose default is "No, exit".
+# Writes what happened to $BENCH_MARKER so the bench can check the outcome.
+marker="${BENCH_MARKER:-/tmp/bench-marker}"
+printf '\033]0;claude\007'
+sel=0
+draw() {
+  clear
+  printf '\033[1;33mAccessing workspace:\033[0m\n\n%s\n\n' "$PWD"
+  echo "Quick safety check: Is this a project you created or one you trust? (Like your own code,"
+  echo "a well-known open source project, or work from your team). If not, take a moment to"
+  echo "review what's in this folder first."
+  echo
+  echo "Claude Code'll be able to read, edit, and execute files here."
+  echo
+  if [ $sel -eq 0 ]; then
+    printf '\033[1;96m> No, exit\033[0m\n  Yes, I trust this folder\n'
+  else
+    printf '  No, exit\n\033[1;96m> Yes, I trust this folder\033[0m\n'
+  fi
+  printf '\n\033[2mEnter to confirm · Esc to cancel\033[0m\n'
+}
+draw
+while IFS= read -rsn1 key; do
+  if [ "$key" = $'\033' ]; then
+    read -rsn2 -t 0.05 rest
+    case "$rest" in
+      '[A') sel=0 ;;
+      '[B') sel=1 ;;
+      '') echo "cancelled $PWD" > "$marker"; clear; exit 1 ;;
+    esac
+    draw
+  elif [ -z "$key" ]; then
+    break
+  fi
+done
+clear
+if [ $sel -eq 1 ]; then
+  echo "trusted $PWD" > "$marker"
+  printf '\033[1mWelcome to Claude Code\033[0m\n\ncwd: %s\n\n> ' "$PWD"
+  while IFS= read -r line; do printf '> '; done
+else
+  echo "exit $PWD" > "$marker"
+  exit 1
+fi

@@ -7,6 +7,7 @@ Wayland sessions block synthetic input and window control by design.
 from __future__ import annotations
 
 import re
+import sys
 import time
 
 from kai.tools.apps import match_app
@@ -37,8 +38,9 @@ def _is_real(w) -> bool:
     if not title or title in _NOISE or title.startswith("&"):  # "&Save" = a control
         return False
     try:
-        # A minimized window has no size of its own (Windows reports 160x28).
-        return w.isVisible and (w.isMinimized or (w.width >= 80 and w.height >= 40))
+        # A minimized window has no size of its own (Windows reports 160x28) and on X11
+        # it is not even mapped, so "visible" is false for it.
+        return bool(w.isMinimized) or (w.isVisible and w.width >= 80 and w.height >= 40)
     except Exception:
         return False
 
@@ -58,7 +60,21 @@ def _windows():
     pywinctl = _pywinctl()
 
     own = {"kai", "kai needs your permission", "Send diagnostics", "Settings"}
-    return [w for w in pywinctl.getAllWindows() if w.title not in own and _is_real(w)]
+    found = pywinctl.getAllWindows() or _client_list()
+    return [w for w in found if w.title not in own and _is_real(w)]
+
+
+def _client_list() -> list:
+    """Windows from _NET_CLIENT_LIST, for window managers that don't publish the stacking
+    list pywinctl reads (seen with xfwm4)."""
+    if not sys.platform.startswith("linux"):
+        return []
+    try:
+        from pywinctl._pywinctl_linux import LinuxWindow, defaultEwmhRoot
+
+        return [LinuxWindow(w) for w in defaultEwmhRoot.getClientList() or [] if w]
+    except Exception:
+        return []
 
 
 MINIMIZED = " (minimized)"

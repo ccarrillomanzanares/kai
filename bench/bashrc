@@ -1,0 +1,8 @@
+# Shell used inside the bench terminal: plain prompt, title back to "Terminal" at each prompt.
+PS1='PS \w> '
+PROMPT_COMMAND='printf "\033]0;Terminal\007"'
+[ -n "$BENCH_TITLE" ] && PROMPT_COMMAND='printf "\033]0;%s\007" "$BENCH_TITLE"'
+if [ -n "$BENCH_AUTOSTART" ]; then
+  unset BENCH_AUTOSTART
+  cd "$BENCH_DIR" && claude
+fi
