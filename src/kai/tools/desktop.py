@@ -37,7 +37,8 @@ def _is_real(w) -> bool:
     if not title or title in _NOISE or title.startswith("&"):  # "&Save" = a control
         return False
     try:
-        return w.isVisible and w.width >= 80 and w.height >= 40
+        # A minimized window has no size of its own (Windows reports 160x28).
+        return w.isVisible and (w.isMinimized or (w.width >= 80 and w.height >= 40))
     except Exception:
         return False
 
@@ -60,16 +61,48 @@ def _windows():
     return [w for w in pywinctl.getAllWindows() if w.title not in own and _is_real(w)]
 
 
+MINIMIZED = " (minimized)"
+_last_used: tuple[object, str] | None = None  # (handle, title) of the last window acted on
+
+
+def _minimized(w) -> bool:
+    try:
+        return bool(w.isMinimized)
+    except Exception:
+        return False
+
+
 def list_windows() -> list[str]:
-    return [w.title for w in _windows()][:40]
+    return [w.title + (MINIMIZED if _minimized(w) else "") for w in _windows()][:40]
+
+
+def _handle(w):
+    try:
+        return w.getHandle()
+    except Exception:
+        return None
 
 
 def _find_window(title: str):
-    windows = {w.title: w for w in _windows()}
-    match = match_app(title, {t: t for t in windows})
+    global _last_used
+    title = title.removesuffix(MINIMIZED)
+    found = _windows()
+    windows = {}
+    for w in found:
+        windows.setdefault(w.title, w)  # same title twice: the one in front
+    # Exactly as written first: "claude" (a terminal) and "Claude" (an app) can both be open.
+    match = title if title in windows else match_app(title, {t: t for t in windows})
     if match is None:
-        raise LookupError(f"No open window matches '{title}'. Open windows: "
+        hint = ""
+        if _last_used and _last_used[0] is not None:
+            renamed = [w for w in found if _handle(w) == _last_used[0]]
+            if renamed and renamed[0].title != _last_used[1]:
+                hint = (f" The window you last used, '{_last_used[1]}', is still open and is "
+                        f"now titled '{renamed[0].title}': windows rename themselves (a "
+                        "terminal takes the name of the program it runs).")
+        raise LookupError(f"No open window matches '{title}'.{hint} Open windows: "
                           + "; ".join(list(windows)[:15]))
+    _last_used = (_handle(windows[match]), windows[match].title)
     return windows[match]
 
 

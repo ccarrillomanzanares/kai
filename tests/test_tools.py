@@ -157,3 +157,47 @@ def test_os_name_tells_windows_11_from_10(monkeypatch):
     assert system.os_name() == "Windows 11"
     monkeypatch.setattr(system.platform, "version", lambda: "10.0.19045")
     assert system.os_name() == "Windows 10"
+
+
+class _Win:
+    def __init__(self, title, handle, minimized=False, size=(800, 600)):
+        self.title, self._handle, self.isMinimized = title, handle, minimized
+        self.isVisible, (self.width, self.height) = True, size
+
+    def getHandle(self):
+        return self._handle
+
+
+def _fake_windows(monkeypatch, wins):
+    from kai.tools import desktop
+
+    monkeypatch.setattr(desktop, "_windows", lambda: [w for w in wins if desktop._is_real(w)])
+    monkeypatch.setattr(desktop, "_last_used", None)
+    return desktop
+
+
+def test_minimized_windows_are_listed(monkeypatch):
+    wins = [_Win("Notes", 1), _Win("Claude Code", 2, minimized=True, size=(160, 28)),
+            _Win("helper", 3, size=(10, 10))]
+    desktop = _fake_windows(monkeypatch, wins)
+    assert desktop.list_windows() == ["Notes", "Claude Code (minimized)"]
+    assert desktop._find_window("Claude Code (minimized)") is wins[1]
+
+
+def test_window_titles_match_exactly_before_ignoring_case(monkeypatch):
+    wins = [_Win("Claude", 1), _Win("claude", 2)]
+    desktop = _fake_windows(monkeypatch, wins)
+    assert desktop._find_window("claude") is wins[1]
+    assert desktop._find_window("Claude") is wins[0]
+    assert desktop._find_window("CLAUDE") in wins
+
+
+def test_renamed_window_is_pointed_out(monkeypatch):
+    import pytest
+
+    wins = [_Win("claude", 7), _Win("Notes", 1)]
+    desktop = _fake_windows(monkeypatch, wins)
+    desktop._find_window("claude")
+    wins[0].title = "Windows PowerShell"
+    with pytest.raises(LookupError, match="now titled 'Windows PowerShell'"):
+        desktop._find_window("claude")

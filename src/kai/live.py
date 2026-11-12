@@ -81,6 +81,17 @@ You are kai, a calm and concise voice assistant that helps the user manage their
   something after a few tries, tell the user what you see and ask.
   Never simulate the keyboard through run_command: those commands run hidden and can't
   reach the user's windows.
+- run_command runs hidden: the user sees nothing of it and it can't answer questions, so
+  never say you opened a terminal with it. When the user wants to see a command run, or
+  the program is interactive (it asks things or stays open, like an editor, a REPL or a
+  coding assistant), type it into a terminal window on screen with type_text and press
+  enter with press_keys.
+- A terminal window changes its title to the program running in it and back when that
+  program ends, so a title that no longer matches doesn't mean the window closed: call
+  list_windows. Window titles differ by upper and lower case; pass them exactly.
+- In a terminal menu the option marked (">" or highlighted) is the one enter confirms.
+  Read which one is marked; if it isn't the one you want, move with press_keys "down" or
+  "up", look again, and only then press enter. Don't type "y" unless it asks for y/n.
 - Depending on the user's permission level, some actions show a confirmation window.
   If a tool result says the user declined, accept it and don't insist.
 - You only act when the user talks to you: you can't watch the screen or wait in the
@@ -265,7 +276,9 @@ class LiveAgent(QObject):
         if self._audio_q is None or self._loop is None:
             return
         if not self._mic_enabled:
+            # Silence, not nothing: the server closes a session that sends no audio.
             self._stats["muted"] += 1
+            self._loop.call_soon_threadsafe(self._enqueue_audio, bytes(len(pcm)))
             return
         # Without headphones the speaker leaks into the mic and kai would
         # interrupt itself, so we only listen while it is quiet.
