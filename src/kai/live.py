@@ -47,6 +47,14 @@ You are kai, a calm and concise voice assistant that helps the user manage their
   or "Pressed" only mean the input was sent: before saying a video plays, a file was saved
   or a message was sent, read the page or window again, or look at the screen. If it
   didn't work, say so plainly and try another way.
+- When the user names the app or the way to do something ("do it in OpenCode", "with
+  VS Code"), that choice is part of the request. Trying another way means another route
+  inside that same app. If you can't get it done there, stop, tell the user what is
+  blocking you and ask how to go on: don't switch to another app, a terminal or
+  run_command on your own. The user picked that app for a reason, and a result made
+  elsewhere is not what they asked for.
+- Never type into a window that already holds the user's work (an open document, a
+  draft, a chat): your text would land inside it.
 - You can do much more than your specific tools: for anything they don't cover
   (settings, network, installed software, moving or renaming files, etc.) use run_command
   with a command for the user's operating system. Don't tell the user you can't do
@@ -132,6 +140,7 @@ About the kai app itself, so you can help the user with it:
 """
 
 MAX_BACKOFF = 30
+QUOTA_FIRST_RETRY = 5  # a lone quota error is often a blip on Google's side: retry soon
 CONFIRM_TIMEOUT = 120  # seconds before an unanswered confirmation counts as declined
 HEARTBEAT_SECONDS = 60  # how often the log records the health of the session
 VOICED_LEVEL = 0.05  # mic chunks louder than this probably contain speech
@@ -428,6 +437,7 @@ class LiveAgent(QObject):
     async def _reconnect_loop(self, client: genai.Client) -> None:
         backoff = 1
         stale_resumes = 0  # "already exists" errors in a row
+        quota_errors = 0  # quota errors in a row
         while not self._stopping:
             self._set_state(State.CONNECTING)
             resumed = False
@@ -443,6 +453,7 @@ class LiveAgent(QObject):
                     transcript.note("connected" + (" (resumed)" if self._handle else ""))
                     self._set_state(State.LISTENING)
                     backoff = 1
+                    quota_errors = 0
                     opened = time.monotonic()
                     try:
                         resumed = await self._serve_until_reconnect(s)
@@ -464,7 +475,9 @@ class LiveAgent(QObject):
                                     "what was said before.")
                     backoff = 1
                     continue
-                if self._handle:
+                quota = e.code == 429 or "quota" in detail.lower()
+                # A quota error says nothing about the old session: keep its handle.
+                if self._handle and not quota:
                     # Resuming keeps the context, but if the old session fails twice in a
                     # row within a minute (e.g. "already exists" after a long idle), start a
                     # fresh one rather than retrying it forever.
@@ -474,9 +487,13 @@ class LiveAgent(QObject):
                         log.info("Dropping the resumption handle after repeated errors")
                         self._handle = None
                         stale_resumes = 0
-                if e.code == 429 or "quota" in detail.lower():
-                    self.error.emit("Free-tier quota reached. Retrying shortly…")
-                    backoff = MAX_BACKOFF
+                if quota:
+                    quota_errors += 1
+                    if quota_errors == 1:
+                        backoff = QUOTA_FIRST_RETRY  # quietly: the bar already shows "connecting"
+                    else:
+                        self.error.emit("Free-tier quota reached. Retrying shortly…")
+                        backoff = MAX_BACKOFF
                 else:
                     self.error.emit(f"Connection lost: {detail}")
             except Exception as e:
