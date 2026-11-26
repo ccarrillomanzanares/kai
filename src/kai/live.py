@@ -35,6 +35,17 @@ def _is_key_problem(code: int | None, detail: str) -> bool:
         w in text for w in ("api key", "api_key", "permission", "unauthenticated", "invalid key"))
 
 
+def _is_quota_problem(exc: Exception) -> bool:
+    """Google is out of quota for this key, whichever way the refusal arrives: a close
+    frame after connecting, or the connection itself turned down with HTTP 429."""
+    code = getattr(exc, "code", None)
+    if code is None:  # websockets' InvalidStatus carries the HTTP response
+        code = getattr(getattr(exc, "response", None), "status_code", None)
+    text = (getattr(exc, "message", None) or str(exc)).lower()
+    return code == 429 or any(
+        w in text for w in ("quota", "resource has been exhausted", "resource_exhausted"))
+
+
 LONG_RUN = 8  # tool calls without speaking before kai is nudged to check in with the user
 MAX_SILENT_RUN = 16  # ...and before further tool calls are refused until it speaks
 
@@ -53,8 +64,8 @@ You are kai, a calm and concise voice assistant that helps the user manage their
   blocking you and ask how to go on: don't switch to another app, a terminal or
   run_command on your own. The user picked that app for a reason, and a result made
   elsewhere is not what they asked for.
-- Never type into a window that already holds the user's work (an open document, a
-  draft, a chat): your text would land inside it.
+- Don't type into a window that holds the user's work (an open document, a draft, a
+  chat) unless they asked you to write there: your text would land inside it.
 - You can do much more than your specific tools: for anything they don't cover
   (settings, network, installed software, moving or renaming files, etc.) use run_command
   with a command for the user's operating system. Don't tell the user you can't do
@@ -141,6 +152,7 @@ About the kai app itself, so you can help the user with it:
 
 MAX_BACKOFF = 30
 QUOTA_FIRST_RETRY = 5  # a lone quota error is often a blip on Google's side: retry soon
+QUOTA_HANDLE_TRIES = 5  # quota errors in a row before the old session is given up for lost
 CONFIRM_TIMEOUT = 120  # seconds before an unanswered confirmation counts as declined
 HEARTBEAT_SECONDS = 60  # how often the log records the health of the session
 VOICED_LEVEL = 0.05  # mic chunks louder than this probably contain speech
@@ -436,29 +448,33 @@ class LiveAgent(QObject):
 
     async def _reconnect_loop(self, client: genai.Client) -> None:
         backoff = 1
-        stale_resumes = 0  # "already exists" errors in a row
+        stale_resumes = 0  # errors of the old session in a row, less than a minute apart
+        last_stale = 0.0  # when the last of them happened
         quota_errors = 0  # quota errors in a row
         while not self._stopping:
             self._set_state(State.CONNECTING)
             resumed = False
-            connected_at = None
+            quota = False
             try:
                 config = self._config(self._handle)
                 async with client.aio.live.connect(model=MODEL, config=config) as s:
                     self._session = s
-                    connected_at = time.monotonic()
                     self._last_server_msg = time.monotonic()
                     self._voiced_since_msg = 0
                     log.info("Connected to %s (resumed: %s)", MODEL, self._handle is not None)
                     transcript.note("connected" + (" (resumed)" if self._handle else ""))
                     self._set_state(State.LISTENING)
                     backoff = 1
-                    quota_errors = 0
                     opened = time.monotonic()
                     try:
                         resumed = await self._serve_until_reconnect(s)
                     finally:
-                        log.info("Connection closed after %.0fs", time.monotonic() - opened)
+                        served = time.monotonic() - opened
+                        log.info("Connection closed after %.0fs", served)
+                        if served >= 60:
+                            # Only a connection that held shows the quota is back: Google
+                            # can accept one and close it at once for quota.
+                            quota_errors = 0
             except errors.APIError as e:
                 detail = e.message or str(e)
                 log.warning("Live API error %s: %s", e.code, detail)
@@ -475,32 +491,43 @@ class LiveAgent(QObject):
                                     "what was said before.")
                     backoff = 1
                     continue
-                quota = e.code == 429 or "quota" in detail.lower()
+                quota = _is_quota_problem(e)
                 # A quota error says nothing about the old session: keep its handle.
                 if self._handle and not quota:
                     # Resuming keeps the context, but if the old session fails twice in a
                     # row within a minute (e.g. "already exists" after a long idle), start a
                     # fresh one rather than retrying it forever.
-                    lived = time.monotonic() - connected_at if connected_at else 0
-                    stale_resumes = stale_resumes + 1 if lived < 60 else 1
+                    now = time.monotonic()
+                    if now - last_stale > 60:
+                        stale_resumes = 0  # an error from long ago says nothing about this one
+                    stale_resumes += 1
+                    last_stale = now
                     if stale_resumes >= 2:
                         log.info("Dropping the resumption handle after repeated errors")
                         self._handle = None
                         stale_resumes = 0
-                if quota:
-                    quota_errors += 1
-                    if quota_errors == 1:
-                        backoff = QUOTA_FIRST_RETRY  # quietly: the bar already shows "connecting"
-                    else:
-                        self.error.emit("Free-tier quota reached. Retrying shortly…")
-                        backoff = MAX_BACKOFF
-                else:
+                if not quota:
                     self.error.emit(f"Connection lost: {detail}")
             except Exception as e:
-                log.exception("Live session failed")
-                self.error.emit(f"Connection lost: {e}")
+                quota = _is_quota_problem(e)  # e.g. the connection refused with HTTP 429
+                if quota:
+                    log.warning("Live session refused for quota: %s", e)
+                else:
+                    log.exception("Live session failed")
+                    self.error.emit(f"Connection lost: {e}")
             finally:
                 self._session = None
+            if quota:
+                quota_errors += 1
+                if self._handle and quota_errors >= QUOTA_HANDLE_TRIES:
+                    # This long, the old session may be what Google is refusing.
+                    log.info("Dropping the resumption handle after repeated quota errors")
+                    self._handle = None
+                if quota_errors == 1:
+                    backoff = QUOTA_FIRST_RETRY  # quietly: the bar already shows "connecting"
+                else:
+                    self.error.emit("Free-tier quota reached. Retrying shortly…")
+                    backoff = MAX_BACKOFF
             if not self._stopping and not resumed:
                 self._set_state(State.CONNECTING)
                 await asyncio.sleep(backoff)

@@ -77,19 +77,46 @@ def test_expired_session_is_not_a_key_problem():
     assert not _is_key_problem(1008, "BidiGenerateContent session not found or expired")
 
 
-def test_quota_errors_keep_the_session_and_stay_quiet_at_first(monkeypatch):
-    from google.genai import errors
+QUOTA_NOTICE = "Free-tier quota reached. Retrying shortly…"
 
+
+def _quota_error():
+    from google.genai import errors
+    return errors.APIError(1011, "Resource has been exhausted (e.g. check quota).")
+
+
+def _internal_error():
+    from google.genai import errors
+    return errors.APIError(1011, "Internal error")
+
+
+def _run_reconnects(monkeypatch, connections, handle="handle"):
+    """Drive the reconnect loop through one connection per item and stop at the last one.
+
+    Each item says how that connection ends: ("open", error) fails to connect;
+    ("serve", seconds, error) connects, lasts that long and then fails, or with None
+    as the error ends well, resumed on a new connection. Time is a fake clock that the
+    connections and the waits move forward.
+    Returns the agent, the waits between attempts, the notices shown and the handle
+    each connection was opened with.
+    """
     agent = live.LiveAgent("key", full_duplex=True)
-    agent._handle = "handle"
-    shown, waits = [], []
+    agent._handle = handle
+    clock = [1000.0]
+    waits, shown, handles = [], [], []
     agent.error.connect(shown.append)
+    plan = iter(connections)
+    current = []
 
     class Connect:
         async def __aenter__(self):
-            if len(waits) == 2:
+            handles.append(agent._handle)
+            current[:] = [next(plan)]
+            if len(handles) == len(connections):
                 agent._stopping = True
-            raise errors.APIError(1011, "Resource has been exhausted (e.g. check quota).")
+            if current[0][0] == "open":
+                raise current[0][1]
+            return object()
 
         async def __aexit__(self, *exc):
             return False
@@ -99,11 +126,84 @@ def test_quota_errors_keep_the_session_and_stay_quiet_at_first(monkeypatch):
             class live:
                 connect = staticmethod(lambda **kw: Connect())
 
+    async def serve(session):
+        _, seconds, error = current[0]
+        clock[0] += seconds
+        if error:
+            raise error
+        return True
+
     async def no_sleep(seconds):
         waits.append(seconds)
+        clock[0] += seconds
 
+    monkeypatch.setattr(live.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(live.transcript, "note", lambda text: None)
+    monkeypatch.setattr(agent, "_serve_until_reconnect", serve)
     monkeypatch.setattr(live.asyncio, "sleep", no_sleep)
-    asyncio.run(agent._reconnect_loop(Client()))
+
+    async def bounded():  # a loop that waits some other way fails here instead of hanging
+        await asyncio.wait_for(agent._reconnect_loop(Client()), timeout=10)
+
+    asyncio.run(bounded())
+    return agent, waits, shown, handles
+
+
+def test_quota_errors_keep_the_session_and_stay_quiet_at_first(monkeypatch):
+    agent, waits, shown, _ = _run_reconnects(
+        monkeypatch, [("open", _quota_error())] * 3)
     assert agent._handle == "handle"  # the conversation can still be resumed
     assert waits == [live.QUOTA_FIRST_RETRY, live.MAX_BACKOFF]
-    assert len(shown) == 2 and all("quota" in m for m in shown)  # none for the first error
+    assert shown == [QUOTA_NOTICE] * 2  # for the second and third errors, not the first
+
+
+def test_quota_errors_after_connecting_are_announced_too(monkeypatch):
+    # Google accepts the connection and closes it at once: still the same quota problem.
+    agent, waits, shown, _ = _run_reconnects(
+        monkeypatch, [("serve", 1, _quota_error())] * 3)
+    assert agent._handle == "handle"
+    assert waits == [live.QUOTA_FIRST_RETRY, live.MAX_BACKOFF]
+    assert shown == [QUOTA_NOTICE] * 2
+
+
+def test_a_connection_that_held_starts_the_quota_count_again(monkeypatch):
+    _, waits, shown, _ = _run_reconnects(
+        monkeypatch, [("open", _quota_error()), ("serve", 300, _quota_error()),
+                      ("open", _quota_error())])
+    assert waits == [live.QUOTA_FIRST_RETRY, live.QUOTA_FIRST_RETRY]
+    assert shown == [QUOTA_NOTICE]  # only for the last one, the second in a row
+
+
+def test_a_connection_refused_with_http_429_is_a_quota_error(monkeypatch):
+    from websockets.datastructures import Headers
+    from websockets.exceptions import InvalidStatus
+    from websockets.http11 import Response
+
+    def refused():
+        return InvalidStatus(Response(429, "Too Many Requests", Headers()))
+
+    agent, waits, shown, _ = _run_reconnects(monkeypatch, [("open", refused())] * 3)
+    assert agent._handle == "handle"
+    assert waits == [live.QUOTA_FIRST_RETRY, live.MAX_BACKOFF]
+    assert shown == [QUOTA_NOTICE] * 2
+
+
+def test_a_session_that_only_gets_quota_errors_is_given_up_in_the_end(monkeypatch):
+    tries = live.QUOTA_HANDLE_TRIES
+    agent, _, _, handles = _run_reconnects(
+        monkeypatch, [("open", _quota_error())] * (tries + 1))
+    assert handles == ["handle"] * tries + [None]
+
+
+def test_two_quick_errors_drop_the_old_session(monkeypatch):
+    _, _, _, handles = _run_reconnects(
+        monkeypatch, [("serve", 100, _internal_error()), ("open", _internal_error()),
+                      ("open", _internal_error())])
+    assert handles == ["handle", "handle", None]
+
+
+def test_an_error_from_long_ago_does_not_count_against_the_session(monkeypatch):
+    agent, _, _, _ = _run_reconnects(
+        monkeypatch, [("serve", 100, _internal_error()), ("serve", 3600, None),
+                      ("serve", 3600, None), ("open", _internal_error())])
+    assert agent._handle == "handle"
