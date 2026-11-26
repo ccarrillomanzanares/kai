@@ -407,6 +407,7 @@ def browser_screenshot() -> bytes:
 
 
 def shutdown() -> None:
+    """Close kai's browser window. The next browser tool opens it again, on a blank page."""
     def close():
         global _pw, _ctx, _page
         try:
@@ -417,6 +418,8 @@ def shutdown() -> None:
         except Exception:
             pass
         _pw = _ctx = _page = None
+        _described.clear()  # the numbers of its last page name nothing now
+        _download_news.clear()
     try:
         _executor.submit(close).result(timeout=10)
     except Exception:

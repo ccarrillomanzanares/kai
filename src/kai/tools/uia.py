@@ -8,6 +8,9 @@ exactly, without a screenshot.
 - Linux: AT-SPI, through PyGObject (`gi`). Needs the system packages
   python3-gi and gir1.2-atspi-2.0, visible to kai's Python.
 
+A terminal that takes part in this hands over the text it shows, and read_window
+passes on its last lines.
+
 Some apps (games, custom-drawn UIs) expose little or nothing; then the model
 falls back to look_at_screen.
 """
@@ -15,6 +18,7 @@ falls back to look_at_screen.
 from __future__ import annotations
 
 import sys
+import textwrap
 import time
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
@@ -27,6 +31,9 @@ MAX_ELEMENTS = 150
 MAX_DEPTH = 30
 TIME_BUDGET = 4.0  # seconds; huge apps are cut short rather than hanging
 NAME_CHARS = 80
+# Of the text a terminal shows, the last lines and characters: that is where things happen.
+TERMINAL_LINES = 50
+TERMINAL_CHARS = 4000
 
 
 @dataclass
@@ -38,6 +45,7 @@ class Element:
     enabled: bool = True
     # The live accessibility object, to press or fill it without the mouse.
     handle: object = field(default=None, repr=False, compare=False)
+    text: str = ""  # of a terminal: what it shows, line by line
 
     def describe(self) -> str:
         text = self.role + (f' "{self.name}"' if self.name else "")
@@ -53,6 +61,19 @@ _last_window = ""
 def _clip(text: str | None) -> str:
     text = " ".join((text or "").split())
     return text if len(text) <= NAME_CHARS else text[:NAME_CHARS] + "…"
+
+
+def _screen_text(text: str | None) -> str:
+    """The text a terminal shows, its lines as they are on screen, cut to the last ones."""
+    tidy = "\n".join(line.rstrip() for line in (text or "").splitlines())
+    lines = tidy.strip("\n").split("\n")
+    kept = lines[-TERMINAL_LINES:]
+    while len(kept) > 1 and len("\n".join(kept)) > TERMINAL_CHARS:
+        del kept[0]
+    shown = "\n".join(kept)
+    if len(kept) < len(lines) or len(shown) > TERMINAL_CHARS:
+        shown = "(earlier text left out)\n" + shown[-TERMINAL_CHARS:]
+    return shown
 
 
 # ---- Windows: UI Automation ----
@@ -96,6 +117,28 @@ def _uia_init() -> None:
     globals()["_uia_initializer"] = auto.UIAutomationInitializerInThread()
 
 
+def _is_windows_terminal(ctrl, root) -> bool:
+    """Whether a text or document control is a terminal: one control holding all its text.
+
+    Windows Terminal's says so in its class name (TermControl; WPFTermControl inside other
+    apps). The classic console window has a single document, its text area.
+    """
+    return "TermControl" in (ctrl.ClassName or "") or (
+        ctrl.ControlTypeName == "DocumentControl" and root.ClassName == "ConsoleWindowClass")
+
+
+def _windows_terminal_text(ctrl) -> str:
+    """What a terminal's control shows, through the text pattern screen readers use."""
+    import uiautomation as auto
+
+    try:
+        # The visible ranges are the lines in view; the document also holds the scrollback.
+        ranges = ctrl.GetPattern(auto.PatternId.TextPattern).GetVisibleRanges()
+        return _screen_text("\n".join((r.GetText(-1) or "").rstrip("\r\n") for r in ranges))
+    except Exception:  # no text pattern, or the control went away
+        return ""
+
+
 def _windows_elements(win) -> list[Element]:
     import uiautomation as auto
 
@@ -116,7 +159,9 @@ def _windows_elements(win) -> list[Element]:
             if r.width() < 2 or r.height() < 2:
                 continue
             name = _clip(ctrl.Name)
-            value = ""
+            value = text = ""
+            if role in ("text", "document") and _is_windows_terminal(ctrl, root):
+                role, text = "terminal", _windows_terminal_text(ctrl)
             if role in ("field", "dropdown", "document"):
                 try:
                     value = _clip(ctrl.GetValuePattern().Value)
@@ -125,7 +170,7 @@ def _windows_elements(win) -> list[Element]:
             if role in ("text", "document") and not (name or value):
                 continue
             found.append(Element(role, name, (r.left, r.top, r.width(), r.height()), value,
-                                 bool(ctrl.IsEnabled), ctrl))
+                                 bool(ctrl.IsEnabled), ctrl, text))
         except Exception:  # elements can vanish while we walk
             continue
     return found
@@ -140,7 +185,7 @@ _ATSPI_ROLES = {
     "radio button": "radio", "combo box": "dropdown", "tree item": "tree item",
     "table cell": "cell", "label": "text", "heading": "heading", "paragraph": "text",
     "spin button": "number field", "slider": "slider", "check menu item": "menu item",
-    "radio menu item": "menu item", "icon": "icon",
+    "radio menu item": "menu item", "icon": "icon", "terminal": "terminal",
 }
 
 
@@ -155,6 +200,7 @@ def _atspi():
 
 def _atspi_window(title: str):
     Atspi = _atspi()
+    title = title.removesuffix(desktop.MINIMIZED)  # as list_windows hands a minimized one out
     desktop_ = Atspi.get_desktop(0)
     windows = {}
     for i in range(desktop_.get_child_count()):
@@ -165,7 +211,9 @@ def _atspi_window(title: str):
             w = app.get_child_at_index(j)
             if w is not None and w.get_name():
                 windows.setdefault(w.get_name(), w)
-    match = match_app(title, {t: t for t in windows})
+    # Exactly as written first, as desktop._find_window does: "claude" (a terminal) and
+    # "Claude" (an app) can both be open.
+    match = title if title in windows else match_app(title, {t: t for t in windows})
     if match is None:
         raise LookupError(f"No accessible window matches '{title}'. Accessible windows: "
                           + "; ".join(list(windows)[:15]))
@@ -189,16 +237,25 @@ def _linux_elements(title: str) -> tuple[str, list[Element]]:
             if role:
                 e = acc.get_extents(Atspi.CoordType.SCREEN)
                 name = _clip(acc.get_name())
-                value = ""
+                value = text = ""
                 if role.endswith("field"):
                     try:
                         count = Atspi.Text.get_character_count(acc)
                         value = _clip(Atspi.Text.get_text(acc, 0, min(count, 200)))
                     except Exception:
                         pass
+                elif role == "terminal":
+                    # Terminals built on VTE (GNOME Terminal, xfce4-terminal) give what
+                    # they show as their text.
+                    try:
+                        count = Atspi.Text.get_character_count(acc)
+                        text = _screen_text(Atspi.Text.get_text(
+                            acc, max(0, count - 5 * TERMINAL_CHARS), count))
+                    except Exception:
+                        pass
                 if e.width >= 2 and e.height >= 2 and (name or value or role != "text"):
                     found.append(Element(role, name, (e.x, e.y, e.width, e.height), value,
-                                         states.contains(Atspi.StateType.SENSITIVE), acc))
+                                         states.contains(Atspi.StateType.SENSITIVE), acc, text))
             for i in range(acc.get_child_count()):
                 child = acc.get_child_at_index(i)
                 if child is not None:
@@ -241,7 +298,11 @@ def read_window(window: str) -> str:
     if not elements:
         return (f"'{title}' exposes no readable elements (some apps don't). "
                 "Use look_at_screen and click instead.")
-    lines = [f"{n} {e.describe()}" for n, e in _last.items()]
+    lines = []
+    for n, e in _last.items():
+        lines.append(f"{n} {e.describe()}")
+        if e.text:
+            lines[-1] += ", showing:\n" + textwrap.indent(e.text, "    ")
     more = " (list cut short: the window has more)" if len(elements) >= MAX_ELEMENTS else ""
     return f"Elements of '{title}'{more}; use their numbers with click_element:\n" + "\n".join(lines)
 

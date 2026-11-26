@@ -137,8 +137,9 @@ TOOLS: dict[str, Tool] = {
                  "Look at the screen", f"Send a screenshot of {window or 'the screen'} to Gemini")),
         Tool("read_window",
              "List the buttons, fields, menus, links and texts of an app window through the "
-             "system accessibility tree, numbered for click_element. More exact than a "
-             "screenshot; if it finds little, use look_at_screen.",
+             "system accessibility tree, numbered for click_element; of a terminal, also "
+             "the text it shows. More exact than a screenshot; if it finds little, use "
+             "look_at_screen.",
              _params(["window"], window=("string", "Window title or part of it.")),
              uia.read_window, Risk.READ),
         Tool("list_windows",

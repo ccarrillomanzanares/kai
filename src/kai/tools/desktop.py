@@ -34,7 +34,8 @@ _NOISE = {"CoreInput", "DesktopWindowXamlSource", "Chrome Legacy Window",
 
 
 def _is_real(w) -> bool:
-    title = w.title.strip()
+    # On X11 a window that has just opened may not have its title yet: no title at all.
+    title = (w.title or "").strip()
     if not title or title in _NOISE or title.startswith("&"):  # "&Save" = a control
         return False
     try:

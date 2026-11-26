@@ -184,6 +184,20 @@ def test_minimized_windows_are_listed(monkeypatch):
     assert desktop._find_window("Claude Code (minimized)") is wins[1]
 
 
+def test_a_window_that_has_no_title_yet_is_left_out(monkeypatch):
+    from types import SimpleNamespace as NS
+
+    from kai.tools import desktop
+
+    wins = [_Win(None, 1), _Win("Notes", 2)]  # X11 hands out None until the title is set
+    monkeypatch.setattr(desktop, "_pywinctl", lambda: NS(getAllWindows=lambda: wins))
+    monkeypatch.setattr(desktop, "_last_used", None)
+    assert desktop.list_windows() == ["Notes"]
+    assert desktop._find_window("Notes") is wins[1]
+    wins[0].title = "claude"  # a moment later it has one
+    assert desktop.list_windows() == ["claude", "Notes"]
+
+
 def test_window_titles_match_exactly_before_ignoring_case(monkeypatch):
     wins = [_Win("Claude", 1), _Win("claude", 2)]
     desktop = _fake_windows(monkeypatch, wins)
